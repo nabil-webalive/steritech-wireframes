@@ -1,0 +1,146 @@
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font-sans); }
+.wrap { padding: 1.5rem 0; }
+h1 { font-size: 18px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 1.5rem; }
+.section { margin-bottom: 1.5rem; border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden; }
+.section-header { background: var(--color-background-secondary); padding: 10px 16px; font-size: 13px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.subsection { border-bottom: 0.5px solid var(--color-border-tertiary); }
+.subsection:last-child { border-bottom: none; }
+.subsection-header { padding: 8px 16px; font-size: 13px; font-weight: 500; color: var(--color-text-primary); background: var(--color-background-primary); border-bottom: 0.5px solid var(--color-border-tertiary); }
+.field-row { display: grid; grid-template-columns: 220px 1fr 1fr; gap: 0; border-bottom: 0.5px solid var(--color-border-tertiary); }
+.field-row:last-child { border-bottom: none; }
+.field-label { padding: 9px 16px; font-size: 13px; color: var(--color-text-primary); border-right: 0.5px solid var(--color-border-tertiary); }
+.field-type { padding: 9px 16px; font-size: 12px; color: var(--color-text-secondary); border-right: 0.5px solid var(--color-border-tertiary); }
+.field-notes { padding: 9px 16px; font-size: 12px; color: var(--color-text-secondary); }
+.col-headers { display: grid; grid-template-columns: 220px 1fr 1fr; gap: 0; background: var(--color-background-tertiary); border-bottom: 0.5px solid var(--color-border-tertiary); }
+.col-h { padding: 6px 16px; font-size: 11px; font-weight: 500; color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.05em; border-right: 0.5px solid var(--color-border-tertiary); }
+.col-h:last-child { border-right: none; }
+.badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
+.badge-text { background: var(--color-background-info); color: var(--color-text-info); }
+.badge-num { background: var(--color-background-success); color: var(--color-text-success); }
+.badge-email { background: #EEEDFE; color: #3C3489; }
+.badge-date { background: var(--color-background-warning); color: var(--color-text-warning); }
+.badge-dropdown { background: var(--color-background-secondary); color: var(--color-text-primary); border: 0.5px solid var(--color-border-secondary); }
+.badge-radio { background: #FAEEDA; color: #633806; }
+.badge-checkbox { background: #FAECE7; color: #4A1B0C; }
+.badge-button { background: var(--color-background-tertiary); color: var(--color-text-primary); border: 0.5px solid var(--color-border-primary); }
+.badge-address { background: #E1F5EE; color: #085041; }
+.badge-display { background: #EAF3DE; color: #27500A; }
+.badge-upload { background: #F1EFE8; color: #444441; }
+.indent { padding-left: 32px !important; }
+.indent2 { padding-left: 48px !important; }
+.dynamic-note { font-size: 11px; color: var(--color-text-secondary); font-style: italic; }
+.options-list { font-size: 11px; color: var(--color-text-secondary); margin-top: 2px; }
+</style>
+<div class="wrap">
+<h2 class="sr-only" style="position:absolute;left:-9999px">Steritech Irradiation Request Form — field specification</h2>
+<h1>Irradiation request form — field spec</h1>
+
+<div class="section">
+  <div class="section-header">1 · Request details</div>
+  <div class="col-headers">
+    <div class="col-h">Field</div>
+    <div class="col-h">Input type</div>
+    <div class="col-h">Notes</div>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-header">Company information</div>
+    <div class="field-row"><div class="field-label">Company name</div><div class="field-type"><span class="badge badge-text">Text</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label">Contact name</div><div class="field-type"><span class="badge badge-text">Text</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label">Mobile</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label">Email</div><div class="field-type"><span class="badge badge-email">Email</span></div><div class="field-notes"></div></div>
+  </div>
+
+  <div class="subsection">
+    <div class="subsection-header">Order details</div>
+    <div class="field-row"><div class="field-label">P.O. (if applicable)</div><div class="field-type"><span class="badge badge-text">Text</span> <span class="badge badge-num">Number</span></div><div class="field-notes">Alphanumeric</div></div>
+    <div class="field-row"><div class="field-label">Pallet spaces</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label">CHEPs</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label">ETA to Steritech</div><div class="field-type"><span class="badge badge-date">Date</span></div><div class="field-notes"></div></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-header">2 · Treatment details</div>
+  <div class="col-headers">
+    <div class="col-h">Field</div>
+    <div class="col-h">Input type</div>
+    <div class="col-h">Notes / options</div>
+  </div>
+
+  <div class="field-row"><div class="field-label">Market</div><div class="field-type"><span class="badge badge-dropdown">Dropdown</span></div><div class="field-notes">
+    <div class="options-list">South Australia 150Gy · Tasmania 150Gy · Western Australia 150Gy · Western Australia 300Gy · Western Australia 400Gy</div>
+  </div></div>
+
+  <div class="subsection">
+    <div class="subsection-header">Irradiated pallets <span class="dynamic-note">— repeatable via "Add pallet" button</span></div>
+
+    <div class="field-row"><div class="field-label indent">Pallet space</div><div class="field-type"><span class="badge badge-dropdown">Dropdown</span></div><div class="field-notes">Auto-assigned or selected from available spaces</div></div>
+    <div class="field-row"><div class="field-label indent">No. of spaces</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label indent">Storage temperature</div><div class="field-type"><span class="badge badge-dropdown">Dropdown</span></div><div class="field-notes">
+      <div class="options-list">1°C – 4°C · 5°C – 10°C · 11°C – 16°C</div>
+    </div></div>
+    <div class="field-row"><div class="field-label indent">No. of CHEPs</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+    <div class="field-row"><div class="field-label indent">No. of cartons</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+
+    <div class="subsection">
+      <div class="subsection-header" style="padding-left:32px">Commodity <span class="dynamic-note">— repeatable via "Add commodity" button</span></div>
+      <div class="field-row"><div class="field-label indent2">Commodity</div><div class="field-type"><span class="badge badge-text">Text</span></div><div class="field-notes"></div></div>
+      <div class="field-row"><div class="field-label indent2">Grower</div><div class="field-type"><span class="badge badge-text">Text</span></div><div class="field-notes"></div></div>
+      <div class="field-row"><div class="field-label indent2">No. of cartons</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+      <div class="field-row"><div class="field-label indent2">No. of CHEPs</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+      <div class="field-row"><div class="field-label indent2">Pulp temp min</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+      <div class="field-row"><div class="field-label indent2">Pulp temp max</div><div class="field-type"><span class="badge badge-num">Number</span></div><div class="field-notes"></div></div>
+      <div class="field-row"><div class="field-label indent2">Address</div><div class="field-type"><span class="badge badge-address">Address</span></div><div class="field-notes"></div></div>
+    </div>
+    <div class="field-row" style="background:var(--color-background-secondary)"><div class="field-label indent" style="color:var(--color-text-secondary); font-size:12px;">+ Add commodity</div><div class="field-type"><span class="badge badge-button">Button</span></div><div class="field-notes">Appends a new commodity block above</div></div>
+  </div>
+
+  <div class="field-row" style="background:var(--color-background-secondary)"><div class="field-label" style="color:var(--color-text-secondary); font-size:12px;">+ Add pallet</div><div class="field-type"><span class="badge badge-button">Button</span></div><div class="field-notes">Appends a new irradiated pallet block above</div></div>
+</div>
+
+<div class="section">
+  <div class="section-header">3 · Collection from Steritech</div>
+  <div class="col-headers">
+    <div class="col-h">Field</div>
+    <div class="col-h">Input type</div>
+    <div class="col-h">Notes</div>
+  </div>
+  <div class="field-row"><div class="field-label">Steritech to book transportation?</div><div class="field-type"><span class="badge badge-radio">Radio</span></div><div class="field-notes">Yes / No</div></div>
+  <div class="field-row"><div class="field-label">Delivery address</div><div class="field-type"><span class="badge badge-address">Address</span></div><div class="field-notes"></div></div>
+  <div class="field-row"><div class="field-label">Expected delivery date</div><div class="field-type"><span class="badge badge-date">Date</span></div><div class="field-notes"></div></div>
+  <div class="field-row"><div class="field-label">Charge</div><div class="field-type"><span class="badge badge-display">Display</span></div><div class="field-notes">Read-only calculated price</div></div>
+</div>
+
+<div class="section">
+  <div class="section-header">4 · Documents, notes &amp; declaration</div>
+  <div class="col-headers">
+    <div class="col-h">Field</div>
+    <div class="col-h">Input type</div>
+    <div class="col-h">Notes</div>
+  </div>
+  <div class="field-row"><div class="field-label">Upload documents</div><div class="field-type"><span class="badge badge-upload">File upload</span></div><div class="field-notes"></div></div>
+  <div class="field-row"><div class="field-label">Notes</div><div class="field-type"><span class="badge badge-text">Text (multiline)</span></div><div class="field-notes">Placeholder: "Write text here"</div></div>
+  <div class="field-row"><div class="field-label">Declaration</div><div class="field-type"><span class="badge badge-checkbox">Checkbox</span></div><div class="field-notes">"I agree to the declaration above" — required to submit</div></div>
+</div>
+
+<div style="margin-top:1rem; padding:12px 16px; background:var(--color-background-secondary); border-radius:var(--border-radius-md); border:0.5px solid var(--color-border-tertiary);">
+  <p style="font-size:12px; color:var(--color-text-secondary); margin-bottom:6px; font-weight:500;">Input type legend</p>
+  <div style="display:flex; flex-wrap:wrap; gap:6px;">
+    <span class="badge badge-text">Text</span>
+    <span class="badge badge-num">Number</span>
+    <span class="badge badge-email">Email</span>
+    <span class="badge badge-date">Date</span>
+    <span class="badge badge-address">Address</span>
+    <span class="badge badge-dropdown">Dropdown</span>
+    <span class="badge badge-radio">Radio</span>
+    <span class="badge badge-checkbox">Checkbox</span>
+    <span class="badge badge-display">Display (read-only)</span>
+    <span class="badge badge-upload">File upload</span>
+    <span class="badge badge-button">Button</span>
+  </div>
+</div>
+</div>
