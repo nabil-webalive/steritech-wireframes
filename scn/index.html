@@ -213,6 +213,8 @@ const BADGE_MAP = {
   PROCESS_OUT:            { bg: '#FEF3C7', color: '#92400E', label: 'AWAITING QA' },
   QA_RELEASED:            { bg: '#CCFBF1', color: '#0F766E' },
   QA_HOLD:                { bg: '#FEE2E2', color: '#991B1B' },
+  // Pallet states only. Order-workflow states are deliberately absent - see the
+  // "Order workflow: intentionally NOT shown" note above SAMPLE_ORDERS.
   SHIPPED:                { bg: '#DCFCE7', color: '#15803D' },
   IN_STORAGE_UNPROCESSED: { bg: '#E2E8F0', color: '#475569' },
   IN_STORAGE_PROCESSED:   { bg: '#FEF3C7', color: '#92400E', label: 'AWAITING QA' },
@@ -520,21 +522,50 @@ Object.assign(window, {
 //                              item within the pallet".
 // ═════════════════════════════════════════════════════════════════════════════
 
+// Where a pallet physically sits, given the step it is on. A pallet in treatment
+// is inside a chamber, not in a storage bay - so the bin has to follow the state,
+// otherwise the data contradicts itself.
+const binForState = (state, n) => {
+  const nn = String(n).padStart(2, '0');
+  switch (state) {
+    case 'RECEIVED':               return `Zone A - Inbound ${nn}`;
+    case 'IN_STORAGE_UNPROCESSED': return `Zone B - Bay ${nn}`;
+    case 'STAGED':                 return `Zone B - Stage ${nn}`;
+    case 'IN_TREATMENT':           return `Zone D - Cell ${((n - 1) % 3) + 1}`;
+    case 'PROCESS_OUT':            return `Zone C - Bay ${nn}`;
+    case 'IN_STORAGE_PROCESSED':   return `Zone C - Bay ${nn}`;
+    case 'QA_HOLD':                return `Zone Q - Hold ${nn}`;
+    case 'QA_RELEASED':            return `Zone C - Bay ${nn}`;
+    case 'PACKED':                 return `Zone F - Dispatch ${nn}`;
+    // A dispatched pallet has left the site, so it has no bin at all.
+    case 'SHIPPED':                return '';
+    default:                       return `Zone A - Inbound ${nn}`;
+  }
+};
+
 // Builds a large pallet set from a list of states. Real orders are not always
 // 1-3 pallets - a single request can land as 20+, so the UI has to hold up.
-const bulkPallets = (prefix, product, states) => states.map((state, i) => ({
-  id: `${prefix}-${String(i + 1).padStart(2, '0')}`,
-  state,
-  weight: 46 + (i % 5),
-  bin: `Zone E - Bay ${String((i % 10) + 1).padStart(2, '0')}`,
-  items: [{ name: product, qty: 500, lot: `LOT-2026-${String.fromCharCode(65 + i)}` }],
-}));
+// Lot numbers are namespaced by the pallet id: a lot identifies one batch, so
+// two customers' goods must never share one.
+const bulkPallets = (prefix, product, states) => states.map((state, i) => {
+  const nn = String(i + 1).padStart(2, '0');
+  return {
+    id: `${prefix}-${nn}`,
+    state,
+    weight: 46 + (i % 5),
+    // Bay numbers start at 21 so this order never lands in a bay another order
+    // is already occupying. Treatment cells are shared on purpose - a cell holds
+    // several pallets at once, a storage bay holds one.
+    bin: binForState(state, i + 21),
+    items: [{ name: product, qty: 500, lot: `LOT-${prefix.replace('PLT-', '')}-${nn}` }],
+  };
+});
 
 const SAMPLE_ORDERS = [
   {
     // 20 pallets on one order - the stress case for every list in this app.
     id: 'ORD-2026-046', customer: 'Meridian Health Group', stream: 'irradiation',
-    date: 'Apr 29', product: 'Nitrile Examination Gloves', assignee: 'Liam Carter',
+    date: 'Apr 29', assignee: 'Liam Carter',
     pallets: bulkPallets('PLT-2026-046', 'Nitrile Examination Gloves', [
       'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED',
       'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'PROCESS_OUT', 'PROCESS_OUT',
@@ -544,25 +575,25 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-041', customer: 'MedTech Australia', stream: 'irradiation',
-    date: 'Apr 28', product: 'Surgical Instruments - Class II', assignee: 'Pan Xiao',
+    date: 'Apr 28', assignee: 'Pan Xiao',
     pallets: [
-      { id: 'PLT-2026-041-01', state: 'RECEIVED',     weight: 48, bin: 'Zone A - Bay 04', items: [
+      { id: 'PLT-2026-041-01', state: 'RECEIVED',     weight: 48, bin: 'Zone A - Inbound 04', items: [
         { name: 'Surgical Instruments - Class II', qty: 48,  lot: 'LOT-2026-A' },
         { name: 'Indicator Strips',                qty: 120, lot: 'LOT-2026-C' },
       ]},
-      { id: 'PLT-2026-041-02', state: 'IN_TREATMENT', weight: 52, bin: 'Zone A - Bay 05', items: [
+      { id: 'PLT-2026-041-02', state: 'IN_TREATMENT', weight: 52, bin: 'Zone D - Cell 1', items: [
         { name: 'Sterile Packaging Pouches',       qty: 200, lot: 'LOT-2026-B' },
       ]},
-      { id: 'PLT-2026-041-03', state: 'RECEIVED',     weight: 42, bin: 'Zone A - Bay 06', items: [
+      { id: 'PLT-2026-041-03', state: 'RECEIVED',     weight: 42, bin: 'Zone A - Inbound 06', items: [
         { name: 'Surgical Instruments - Class II', qty: 36,  lot: 'LOT-2026-D' },
       ]},
     ],
   },
   {
     id: 'ORD-2026-038', customer: 'BioPharma Ltd', stream: 'eto',
-    date: 'Apr 27', product: 'Single-Use Catheters', assignee: 'Pan Xiao',
+    date: 'Apr 27', assignee: 'Pan Xiao',
     pallets: [
-      { id: 'PLT-2026-038-01', state: 'STAGED', weight: 88, bin: 'Zone B - Bay 01', items: [
+      { id: 'PLT-2026-038-01', state: 'STAGED', weight: 88, bin: 'Zone B - Stage 01', items: [
         { name: 'Single-Use Catheters - 14Fr', qty: 320, lot: 'LOT-2026-E' },
         { name: 'Catheter Fixation Packs',     qty: 160, lot: 'LOT-2026-F' },
       ]},
@@ -570,7 +601,7 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-035', customer: 'SurgiCare Corp', stream: 'irradiation',
-    date: 'Apr 26', product: 'Sterile Gloves - Bulk', assignee: 'Liam Carter',
+    date: 'Apr 26', assignee: 'Liam Carter',
     pallets: [
       { id: 'PLT-2026-035-01', state: 'PROCESS_OUT',  weight: 62, bin: 'Zone C - Bay 02', items: [
         { name: 'Sterile Gloves - Size M', qty: 400, lot: 'LOT-2026-G' },
@@ -584,14 +615,14 @@ const SAMPLE_ORDERS = [
       { id: 'PLT-2026-035-04', state: 'IN_TREATMENT', weight: 62, bin: 'Zone D - Cell 1', items: [
         { name: 'Sterile Gloves - Size XL', qty: 320, lot: 'LOT-2026-K' },
       ]},
-      { id: 'PLT-2026-035-05', state: 'STAGED',       weight: 62, bin: 'Zone B - Bay 07', items: [
+      { id: 'PLT-2026-035-05', state: 'STAGED',       weight: 62, bin: 'Zone B - Stage 07', items: [
         { name: 'Sterile Gloves - Size M', qty: 400, lot: 'LOT-2026-L' },
       ]},
     ],
   },
   {
     id: 'ORD-2026-031', customer: 'HealthPlus Group', stream: 'packing',
-    date: 'Apr 25', product: 'IV Administration Sets', assignee: 'Pan Xiao',
+    date: 'Apr 25', assignee: 'Pan Xiao',
     pallets: [
       { id: 'PLT-2026-031-01', state: 'PROCESS_OUT', weight: 48, bin: 'Zone C - Bay 05', items: [
         { name: 'IV Administration Sets - 20 drop', qty: 250, lot: 'LOT-2026-M' },
@@ -603,7 +634,7 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-028', customer: 'NovaMed Supplies', stream: 'eto',
-    date: 'Apr 24', product: 'Wound Dressing Packs', assignee: 'Pan Xiao',
+    date: 'Apr 24', assignee: 'Pan Xiao',
     pallets: [
       { id: 'PLT-2026-028-01', state: 'QA_RELEASED', weight: 51, bin: 'Zone C - Bay 08', items: [
         { name: 'Wound Dressing Packs - Small', qty: 300, lot: 'LOT-2026-P' },
@@ -621,7 +652,7 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-024', customer: 'CardioCare Health', stream: 'irradiation',
-    date: 'Apr 23', product: 'Cardiac Stents - Box Set', assignee: 'Pan Xiao',
+    date: 'Apr 23', assignee: 'Pan Xiao',
     pallets: [
       { id: 'PLT-2026-024-01', state: 'QA_HOLD',     weight: 32, bin: 'Zone Q - Hold 1', items: [
         { name: 'Cardiac Stents - 3.0 mm', qty: 120, lot: 'LOT-2026-T' },
@@ -633,15 +664,15 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-019', customer: 'TerraCare Medical', stream: 'packing',
-    date: 'Apr 22', product: 'Disposable Syringes - 5 mL', assignee: 'Liam Carter',
+    date: 'Apr 22', assignee: 'Liam Carter',
     pallets: [
-      { id: 'PLT-2026-019-01', state: 'SHIPPED', weight: 52, bin: 'Dispatched', items: [
+      { id: 'PLT-2026-019-01', state: 'SHIPPED', weight: 52, bin: '', items: [
         { name: 'Disposable Syringes - 5 mL', qty: 500, lot: 'LOT-2026-V' },
       ]},
-      { id: 'PLT-2026-019-02', state: 'SHIPPED', weight: 52, bin: 'Dispatched', items: [
+      { id: 'PLT-2026-019-02', state: 'SHIPPED', weight: 52, bin: '', items: [
         { name: 'Disposable Syringes - 5 mL', qty: 500, lot: 'LOT-2026-W' },
       ]},
-      { id: 'PLT-2026-019-03', state: 'SHIPPED', weight: 52, bin: 'Dispatched', items: [
+      { id: 'PLT-2026-019-03', state: 'SHIPPED', weight: 52, bin: '', items: [
         { name: 'Disposable Syringes - 10 mL', qty: 400, lot: 'LOT-2026-X' },
       ]},
     ],
@@ -772,6 +803,20 @@ const orderState      = o => {
   return ps.reduce((lo, p) => (STEP_OF(p) < STEP_OF(lo) ? p : lo), ps[0]).state;
 };
 const palletsPastQA   = o => orderPallets(o).filter(p => STEP_OF(p) >= 7).length;
+// ── Order workflow: intentionally NOT shown in this mockup ───────────────────
+// Exsited already runs an "Orders" workflow on the Steritech Order Number
+// component (Created, Accepted, On Hold, Late Arrival, Cancelled, Scheduled for
+// Processing, In Process, Ready For Invoicing, Completed). It is a separate axis
+// from the pallet states this app drives.
+//
+// We had derived an order badge from pallet progress, but how pallet scanning
+// should move an order through those states is NOT agreed with Steritech yet -
+// it is open questions 12 and 13 on the client question list. Rather than show a
+// guess, the order badge is left out until they confirm the mapping.
+//
+// To restore: derive from the pallets (all Received -> Scheduled for Processing,
+// any moving -> In Process, all Dispatched -> Ready For Invoicing), letting any
+// explicit order-level state win. Full background: docs/STERISCAN-DATA-PLACEMENT.md
 // Group an order's pallets by state, earliest workflow step first. Per-pallet
 // chips stop working past ~6 pallets; a grouped count scales to 20 or 200.
 const palletsByState  = o => {
@@ -786,6 +831,19 @@ const palletsByState  = o => {
 };
 const stateLabel = state =>
   (BADGE_MAP[state] && BADGE_MAP[state].label) || state.replace(/_/g, ' ');
+
+// An order has no product of its own - what it contains is whatever its pallets
+// carry. Deriving the label keeps it honest: a stored order-level product name
+// silently lies as soon as the order carries more than one thing.
+const uniqueNames = items => [...new Set(items.map(i => i.name))];
+const summarise = names =>
+  !names.length ? '' : names.length === 1 ? names[0] : `${names[0]} + ${names.length - 1} more`;
+const palletProductLabel = p => summarise(uniqueNames((p && p.items) || []));
+// A dispatched pallet has no bin. Say where it is, not what happened to it.
+const binLabel = p => (p && p.bin) || 'Off site';
+// Demo timestamps are anchored to the order's own arrival date. Hardcoding a
+// date meant a pallet could show a treatment that started before it arrived.
+const stamp = (order, time) => `${(order && order.date) || 'Apr 28'}, 2026 - ${time}`;
 // Flat list of every physical pallet in the yard, each carrying its parent order.
 const ALL_PALLETS     = SAMPLE_ORDERS.flatMap(o => o.pallets.map(p => ({ ...p, order: o })));
 const DEFAULT_PALLET_ORDER = SAMPLE_ORDERS[0];
@@ -809,8 +867,12 @@ const palletOf = (appData, order) => {
   }
   return orderPallets(order || appData.selectedOrder)[0] || DEFAULT_PALLET;
 };
-const targetDose = stream =>
-  stream === 'irradiation' ? '25 - 45 kGy' : stream === 'eto' ? 'Standard 12hr' : 'Blister Pack';
+// Each stream is specified differently. Packing has neither a dose nor a cycle,
+// so labelling its pack type "Target Dose / Cycle" was simply wrong.
+const treatmentSpec = stream =>
+  stream === 'eto'     ? { label: 'Cycle',       value: 'Standard 12hr' } :
+  stream === 'packing' ? { label: 'Pack Type',   value: 'Blister Pack'  } :
+                         { label: 'Target Dose', value: '25 - 45 kGy'   };
 
 const KPI = ({ label, value, color }) => (
   <div style={{ flex: 1, background: '#fff', borderRadius: 12, padding: '10px 12px', border: `1px solid ${C.border}` }}>
@@ -871,13 +933,16 @@ const DashboardScreen = ({ navigate, appData }) => {
 
   // ── Orders view: filter/search at order level, state derived from pallets ──
   const filteredOrders = SAMPLE_ORDERS.filter(o => {
-    if (!stateMatches(orderState(o))) return false;
+    // An order matches a filter when ANY of its pallets does. Matching on the
+    // order's rolled-up state would hide an order with 8 pallets awaiting QA
+    // just because one pallet is still at Received.
+    if (!orderPallets(o).some(p => stateMatches(p.state))) return false;
     if (!q) return true;
     return o.id.toLowerCase().includes(q)
       || o.customer.toLowerCase().includes(q)
-      || (o.product || '').toLowerCase().includes(q)
-      // Searching a pallet barcode should surface its parent order too.
-      || orderPallets(o).some(p => p.id.toLowerCase().includes(q));
+      // Searching a pallet barcode, a product or a lot should all surface the order.
+      || orderPallets(o).some(p => p.id.toLowerCase().includes(q)
+        || p.items.some(it => it.name.toLowerCase().includes(q) || it.lot.toLowerCase().includes(q)));
   });
   const sortedOrders = [...filteredOrders].sort((a, b) => {
     if (sort === 'status') return orderStep(a) - orderStep(b);
@@ -1024,23 +1089,24 @@ const DashboardScreen = ({ navigate, appData }) => {
           {/* ── ORDERS VIEW: one card per customer request ────────────────── */}
           {view === 'orders' && sortedOrders.map(order => {
             const oState   = orderState(order);
-            const step     = orderStep(order);
             const pallets  = orderPallets(order);
             const released = palletsPastQA(order);
             return (
               <Card key={order.id} style={{ padding: '14px 16px', cursor: 'pointer' }}
                 onClick={() => navigate('order_detail', { selectedOrder: order })}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                {/* Commodity is deliberately NOT shown here. An order can carry dozens
+                    of different commodities, so any order-level summary is either noise
+                    or a half-truth. Commodity belongs on the pallet, which is where the
+                    operator actually handles it. */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 16, fontWeight: 700, color: C.text }}>{order.id}</div>
                     <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2 }}>{order.customer}</div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-                    <Badge state={oState} />
                     <StreamBadge stream={order.stream} />
                   </div>
                 </div>
-                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, color: C.text, marginBottom: 10 }}>{order.product}</div>
                 {!isQA && (oState === 'QA_RELEASED' || oState === 'QA_HOLD') && (
                   <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5, marginBottom: 10,
@@ -1055,37 +1121,14 @@ const DashboardScreen = ({ navigate, appData }) => {
                     Returned by QA
                   </div>
                 )}
-                {/* Order bar tracks the SLOWEST pallet - the request is not done
-                    until every pallet under it is done. */}
-                <div style={{ display: 'flex', gap: 3, marginBottom: 8 }}>
-                  {[...Array(8)].map((_, i) => (
-                    <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i < step ? C.brand : C.border }}/>
-                  ))}
-                </div>
-                {/* Pallet spread. Each pallet moves on its own, so instead of one
-                    rolled-up number we show how many sit at each step. Grouping
-                    by state (not one chip per pallet) keeps a 20-pallet order
-                    readable on a phone. */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginBottom: 10 }}>
-                  {palletsByState(order).map(g => {
-                    const b = BADGE_MAP[g.state] || { bg: '#E2E8F0', color: '#475569' };
-                    return (
-                      <span key={g.state} style={{
-                        display: 'inline-flex', alignItems: 'center', gap: 4,
-                        background: b.bg, color: b.color, borderRadius: 6,
-                        padding: '2px 7px', fontFamily: 'DM Sans,sans-serif',
-                        fontSize: 10.5, fontWeight: 700, letterSpacing: 0.3,
-                      }}>
-                        <span style={{ width: 5, height: 5, borderRadius: 3, background: 'currentColor' }}/>
-                        {g.pallets.length} {stateLabel(g.state)}
-                      </span>
-                    );
-                  })}
-                </div>
+                {/* Deliberately minimal. The badge already says where the order is
+                    stuck, and the per-state pallet breakdown lives on the order
+                    detail where there is room to group it. Repeating either here
+                    just makes the list harder to scan. */}
                 <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>
-                    {pallets.length} pallet{pallets.length !== 1 ? 's' : ''} · {orderWeight(order)} kg
-                    {released > 0 && ` · ${released}/${pallets.length} released`}
+                    {pallets.length} pallet{pallets.length !== 1 ? 's' : ''}
+                    {released > 0 && ` · ${released} released`}
                   </span>
                   <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.text, fontWeight: 600 }}>
                     {order.date}
@@ -1097,12 +1140,16 @@ const DashboardScreen = ({ navigate, appData }) => {
 
           {/* ── PALLETS VIEW: one card per physical pallet = one workflow run ── */}
           {view === 'pallets' && sortedPallets.map(p => {
-            const step = STEP_OF(p);
             const order = p.order;
             return (
               <Card key={p.id} style={{ padding: '14px 16px', cursor: 'pointer' }}
                 onClick={() => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id })}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                {/* No commodity here either. Every pallet on an order usually carries
+                    the same thing, so the name just repeats down the list, and a
+                    multi-commodity pallet only gets a "+N more" half-truth. A pallet
+                    is found by its id, bin or order - the contents are one tap away
+                    on Pallet Detail. */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                   <div>
                     <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 16, fontWeight: 700, color: C.text }}>{p.id}</div>
                     <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2 }}>
@@ -1114,17 +1161,9 @@ const DashboardScreen = ({ navigate, appData }) => {
                     <StreamBadge stream={order.stream} />
                   </div>
                 </div>
-                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, color: C.text, marginBottom: 10 }}>
-                  {p.items[0].name}{p.items.length > 1 ? ` +${p.items.length - 1} more` : ''}
-                </div>
-                <div style={{ display: 'flex', gap: 3, marginBottom: 10 }}>
-                  {[...Array(8)].map((_, i) => (
-                    <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i < step ? C.brand : C.border }}/>
-                  ))}
-                </div>
                 <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 8, display: 'flex', justifyContent: 'space-between' }}>
                   <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>
-                    {p.bin} · {p.weight} kg · {p.items.length} item{p.items.length !== 1 ? 's' : ''}
+                    {binLabel(p)} · {p.weight} kg
                   </span>
                   <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.text, fontWeight: 600 }}>
                     {order.date}
@@ -1205,7 +1244,7 @@ const TIMELINE_STEPS = [
   { key: 'treatment', label: 'In Treatment',     desc: 'Sterilisation in progress' },
   { key: 'processed', label: 'Processed',        desc: 'Treatment complete' },
   { key: 'qa',        label: 'QA Review',        desc: 'Quality assurance check' },
-  { key: 'packed',    label: 'Packed',           desc: 'Packaged for dispatch' },
+  { key: 'packed',    label: 'Packed',           desc: 'Packaged for dispatch', now: 'Packing' },
   { key: 'shipped',   label: 'Dispatched',       desc: 'On the way to customer' },
 ];
 
@@ -1235,7 +1274,7 @@ const PalletRowCard = ({ pallet, onOpen }) => {
         ))}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted }}>
-        <span>{TIMELINE_STEPS[Math.min(pStep - 1, TIMELINE_STEPS.length - 1)].label} · {pallet.bin}</span>
+        <span>{TIMELINE_STEPS[Math.min(pStep - 1, TIMELINE_STEPS.length - 1)].label} · {binLabel(pallet)}</span>
         <span>{pallet.weight} kg · {pallet.items.length} item{pallet.items.length !== 1 ? 's' : ''}</span>
       </div>
     </Card>
@@ -1317,7 +1356,6 @@ const OrderDetailScreen = ({ navigate, appData }) => {
   const order     = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallets   = orderPallets(order);
   const oState    = orderState(order);       // derived - the order has no state of its own
-  const step      = orderStep(order);        // derived - the slowest pallet
   const released  = palletsPastQA(order);
   const isShipped = oState === 'SHIPPED';
   const isQA      = appData.role === 'qa';
@@ -1355,18 +1393,20 @@ const OrderDetailScreen = ({ navigate, appData }) => {
         )}
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+          {/* No commodity heading. An order can carry dozens of different
+              commodities; they belong on the pallets, listed below. */}
           <div>
-            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, fontWeight: 600 }}>{order.customer}</div>
-            <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>{order.product}</div>
+            <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text }}>{order.customer}</div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
-            <Badge state={oState} />
             <StreamBadge stream={order.stream} />
           </div>
         </div>
 
-        {/* Order-level roll-up. There is deliberately NO step timeline here -
-            a timeline belongs to a pallet, and the pallets are not in step. */}
+        {/* Order-level roll-up. Deliberately NO step timeline and no pallet state
+            name: a timeline belongs to a pallet, and naming a pallet step here
+            would contradict the order-workflow badge above it. Progress is the
+            one thing that is true at order level. */}
         <Card style={{ padding: '16px', marginBottom: 14, background: isShipped ? '#DCFCE7' : '#EEF2FF', border: `1px solid ${isShipped ? '#86EFAC' : '#C7D2FE'}` }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
             <div style={{ width: 48, height: 48, borderRadius: 24, background: isShipped ? C.green : C.brand, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -1378,27 +1418,23 @@ const OrderDetailScreen = ({ navigate, appData }) => {
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: isShipped ? '#15803D' : '#3730A3', textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                {isShipped ? 'Dispatched' : 'Slowest pallet'}
+                Order progress
               </div>
               <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>
-                {TIMELINE_STEPS[Math.min(step - 1, TIMELINE_STEPS.length - 1)].label}
-              </div>
-              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 3 }}>
-                {released} of {pallets.length} pallet{pallets.length !== 1 ? 's' : ''} released by QA
+                {released} of {pallets.length} pallet{pallets.length !== 1 ? 's' : ''} released
               </div>
             </div>
           </div>
         </Card>
 
+        {/* Roll-ups only. Anything true of a single pallet belongs on Pallet
+            Detail, and the stream is already a badge at the top of this screen. */}
         <SectionTitle title="Order details" />
         <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
           <InfoRow label="Pallets" value={`${pallets.length}`} />
           <InfoRow label="Items / Lots" value={`${orderItemCount(order)}`} />
           <InfoRow label="Total Weight" value={`${orderWeight(order)} kg`} />
-          <InfoRow label="Stream" valueEl={<StreamBadge stream={order.stream} />} />
-          <InfoRow label="Target Dose / Cycle" value={targetDose(order.stream)} />
           <InfoRow label="Received" value={order.date + ', 2026'} />
-          {step >= 6 && <InfoRow label="QA Reviewer" value="Sarah Mitchell" />}
         </Card>
 
         {/* The heart of the fix: the pallets are listed individually, each with
@@ -1432,11 +1468,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   const step      = STEP_OF(pallet);
   const isShipped = pallet.state === 'SHIPPED';
   const isQA      = appData.role === 'qa';
-  const siblings  = orderPallets(order).filter(p => p.id !== pallet.id);
   const action    = palletAction(pallet, isQA);
-  // A 20-pallet order would otherwise dump 19 sibling rows at the bottom.
-  const [allSiblings, setAllSiblings] = React.useState(false);
-  const shownSiblings = allSiblings ? siblings : siblings.slice(0, 5);
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
@@ -1448,7 +1480,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
             <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, fontWeight: 600 }}>
               {order.id} · {order.customer}
             </div>
-            <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>{order.product}</div>
+            <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>{palletProductLabel(pallet)}</div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <Badge state={pallet.state} />
@@ -1470,7 +1502,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
                 {isShipped ? 'Dispatched' : 'Current Step'}
               </div>
               <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>
-                {TIMELINE_STEPS[Math.min(step - 1, TIMELINE_STEPS.length - 1)].label}
+                {(t => t.now || t.label)(TIMELINE_STEPS[Math.min(step - 1, TIMELINE_STEPS.length - 1)])}
               </div>
             </div>
           </div>
@@ -1514,16 +1546,15 @@ const PalletDetailScreen = ({ navigate, appData }) => {
         </Card>
 
         <div style={{ height: 14 }}/>
+        {/* Identity, where it belongs, where it is, and what it weighs. The
+            arrival date and treatment spec are order facts and live on the order. */}
         <SectionTitle title="Pallet details" />
         <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
           <InfoRow label="Pallet ID" value={pallet.id} bold />
           <InfoRow label="Order" value={order.id} />
-          <InfoRow label="Bin Location" value={pallet.bin} />
+          <InfoRow label="Bin Location" value={binLabel(pallet)} />
           <InfoRow label="Weight" value={`${pallet.weight} kg`} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={order.stream} />} />
-          <InfoRow label="Target Dose / Cycle" value={targetDose(order.stream)} />
-          <InfoRow label="Received" value={order.date + ', 2026'} />
-          {step >= 6 && <InfoRow label="QA Reviewer" value="Sarah Mitchell" />}
         </Card>
 
         {/* Item-level data capture hangs off these, not off the pallet. */}
@@ -1544,37 +1575,9 @@ const PalletDetailScreen = ({ navigate, appData }) => {
           ))}
         </div>
 
-        {/* Proof the pallets move independently - shown right on the screen. */}
-        {siblings.length > 0 && (
-          <>
-            <SectionTitle title={`Other pallets on ${order.id} (${siblings.length})`} subtitle="Same order, different steps" />
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 }}>
-              {shownSiblings.map(p => (
-                <Card key={p.id} style={{ padding: '10px 14px', cursor: 'pointer' }}
-                  onClick={() => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id })}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 600, color: C.text }}>{p.id}</span>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <Badge state={p.state} />
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="9 18 15 12 9 6"/>
-                      </svg>
-                    </div>
-                  </div>
-                </Card>
-              ))}
-            </div>
-            {siblings.length > 5 && (
-              <button onClick={() => setAllSiblings(!allSiblings)} style={{
-                width: '100%', marginBottom: 10, padding: '8px 0', borderRadius: 10,
-                border: `1px solid ${C.border}`, background: '#fff', cursor: 'pointer',
-                fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.brand,
-              }}>
-                {allSiblings ? 'Show less' : `Show all ${siblings.length} →`}
-              </button>
-            )}
-          </>
-        )}
+        {/* The other pallets on this order are deliberately NOT listed here. The
+            back button goes to Order Detail, which already lists them grouped by
+            state - repeating them as a flat list of 19 rows is worse, not extra. */}
       </div>
 
       {action ? (
@@ -1626,21 +1629,31 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   const isQA  = appData.role === 'qa';
   const mode  = appData.scanMode === 'identify' ? 'identify' : 'work';
   const order = appData.selectedOrder;
-  // Set only when the operator arrived from one specific pallet. That is what
-  // makes a wrong-pallet scan detectable.
-  const expected = appData.selectedPallet || null;
+  // How much the operator has already committed to determines what a scan is
+  // allowed to be. Three levels:
+  //   came from one pallet -> it must be THAT pallet
+  //   came from an order   -> it must be a pallet ON that order
+  //   came from Scan tab   -> anything; this is discovery, not confirmation
+  const expected      = appData.selectedPallet || null;
+  const expectedOrder = expected ? null : (order || null);
   const [mismatch, setMismatch] = React.useState(null);
 
   const target = expected
     || orderPallets(order).find(p => p.state === 'RECEIVED')
     || orderPallets(order)[0]
+    // Scan tab: no order context at all. Land on a pallet at the START of the
+    // workflow, so a scan walks the whole chain from Received rather than
+    // dropping the operator into the middle of it.
+    || ALL_PALLETS.find(p => p.state === 'RECEIVED')
     || DEFAULT_PALLET;
 
-  // A pallet the operator could plausibly grab by mistake: a neighbour on the
-  // same order first, otherwise any other pallet in the yard.
-  const decoy = orderPallets(order).find(p => p.id !== target.id)
-    || ALL_PALLETS.find(p => p.id !== target.id)
-    || DEFAULT_PALLET;
+  // A pallet the operator could plausibly grab by mistake. Which mistake is
+  // possible depends on what was expected: the wrong pallet on the right order,
+  // or a pallet off a different order entirely.
+  const decoy = expected
+    ? (orderPallets(order).find(p => p.id !== expected.id)
+       || ALL_PALLETS.find(p => p.id !== expected.id) || DEFAULT_PALLET)
+    : (ALL_PALLETS.find(p => !expectedOrder || p.order.id !== expectedOrder.id) || DEFAULT_PALLET);
 
   const proceed = (pallet) => {
     const parent = orderOfPallet(pallet.id) || order || DEFAULT_PALLET_ORDER;
@@ -1654,13 +1667,21 @@ const ScanPalletScreen = ({ navigate, appData }) => {
 
   const handleScan = (pallet) => {
     const got = pallet || target;
-    if (expected && got.id !== expected.id) { setMismatch(got); return; }
+    if (expected) {
+      if (got.id !== expected.id) { setMismatch(got); return; }
+    } else if (expectedOrder) {
+      const parent = orderOfPallet(got.id);
+      if (parent && parent.id !== expectedOrder.id) { setMismatch(got); return; }
+    }
     proceed(got);
   };
 
   // ── Mismatch: block, explain, and make the operator choose ──
   if (mismatch) {
-    const sameOrder = orderOfPallet(mismatch.id) === orderOfPallet(expected.id);
+    const scannedOrder = orderOfPallet(mismatch.id);
+    // Two ways to be wrong: the wrong pallet, or the right pallet on the wrong order.
+    const byPallet  = !!expected;
+    const sameOrder = byPallet && scannedOrder === orderOfPallet(expected.id);
     return (
       <PageWrapper title="Wrong Pallet" onBack={() => setMismatch(null)}
         bottomBar={
@@ -1685,21 +1706,25 @@ const ScanPalletScreen = ({ navigate, appData }) => {
             </svg>
             <div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: '#991B1B' }}>
-                This is not the pallet you selected
+                {byPallet
+                  ? 'This is not the pallet you selected'
+                  : `This pallet is not on ${expectedOrder.id}`}
               </div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
-                {sameOrder
-                  ? 'Both pallets are on the same order. Check the label before continuing.'
-                  : 'The scanned pallet belongs to a different order. Continuing will switch you to that order.'}
+                {byPallet
+                  ? (sameOrder
+                      ? 'Both pallets are on the same order. Check the label before continuing.'
+                      : 'The scanned pallet belongs to a different order. Continuing will switch you to that order.')
+                  : `It belongs to ${(scannedOrder || {}).id || 'another order'}. Continuing will switch you to that order.`}
               </div>
             </div>
           </div>
 
           <Card style={{ padding: '14px 16px' }}>
-            <InfoRow label="You selected" value={expected.id} bold />
+            <InfoRow label="Expected"
+              value={byPallet ? expected.id : `Any pallet on ${expectedOrder.id}`} bold />
             <InfoRow label="You scanned" value={mismatch.id} bold />
-            <InfoRow label="Selected pallet's order" value={(orderOfPallet(expected.id) || {}).id || '-'} />
-            <InfoRow label="Scanned pallet's order" value={(orderOfPallet(mismatch.id) || {}).id || '-'} />
+            <InfoRow label="Scanned pallet's order" value={(scannedOrder || {}).id || '-'} />
             <InfoRow label="Scanned pallet state" valueEl={<Badge state={mismatch.state} />} />
           </Card>
         </div>
@@ -1710,7 +1735,7 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   const identify = mode === 'identify';
   return (
     <PageWrapper title={identify ? 'Identify Pallet' : 'Scan Pallet'} onBack={() => navigate('dashboard')}
-      bottomBar={expected ? (
+      bottomBar={(expected || expectedOrder) ? (
         <button onClick={() => handleScan(decoy)} style={{
           width: '100%', background: 'none', border: 'none', color: C.muted,
           fontFamily: 'DM Sans,sans-serif', fontSize: 13, cursor: 'pointer',
@@ -1727,8 +1752,8 @@ const ScanPalletScreen = ({ navigate, appData }) => {
 
         {expected ? (
           <Alert type="warning" message={`Expecting ${expected.id} - scan that pallet's label to confirm`} />
-        ) : order ? (
-          <Alert type="info" message={`Order ${order.id} - ${order.customer} · ${orderPallets(order).length} pallet(s)`} />
+        ) : expectedOrder ? (
+          <Alert type="warning" message={`Scan any pallet on ${expectedOrder.id} - ${orderPallets(expectedOrder).length} pallet(s)`} />
         ) : (
           <Alert type="info" message="Scan any pallet in the warehouse" />
         )}
@@ -1749,9 +1774,9 @@ const ScanBinScreen = ({ navigate, appData }) => {
     if (invalid.current) {
       navigate('supervisor_pin', { prevScreen: 'scan_bin', overrideReason: 'Zone mismatch' });
     } else if (phase === 'post_treatment') {
-      navigate('in_storage_processed', { binLocation: 'Zone C - Bay 02' });
+      navigate('in_storage_processed', { binLocation: binForState('IN_STORAGE_PROCESSED', 2) });
     } else {
-      navigate('receiving_form', { binLocation: 'Zone A - Bay 04' });
+      navigate('receiving_form', { binLocation: binForState('IN_STORAGE_UNPROCESSED', 4) });
     }
   };
   const subtitle = phase === 'post_treatment'
@@ -1844,7 +1869,7 @@ const SummaryScreen = ({ navigate, appData }) => {
         </div>
 
         <Card style={{ padding: '14px 16px', marginBottom: 12 }}>
-          <InfoRow label="Bin Location" value={appData.binLocation || pallet.bin} />
+          <InfoRow label="Bin Location" value={appData.binLocation || binLabel(pallet)} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={order.stream} />} />
           <InfoRow label="Date Received" value={order.date} />
           <InfoRow label="Pallet Weight" value={`${pallet.weight} kg`} />
@@ -1876,6 +1901,9 @@ const SummaryScreen = ({ navigate, appData }) => {
 // 4 steps: Request details · Treatment details · Collection · Documents & declaration
 // All values are read-only (employee is reviewing the customer's submission).
 
+// The receiving form reviews ONE scanned pallet. This template only supplies the
+// extra customer-submitted detail; pallet identity always comes from the real
+// pallet, never from here - which is why there are no pallet ids in it.
 const SAMPLE_REQUEST = {
   // Step 1
   company:      'NSW Fresh Produce Pty Ltd',
@@ -1883,14 +1911,12 @@ const SAMPLE_REQUEST = {
   mobile:       '+61 412 558 901',
   email:        'd.hartley@nswfresh.com.au',
   poNumber:     'PO-2026-04412',
-  palletSpaces: 2,
   cheps:        4,
   eta:          '14 Apr 2026, 09:30',
   // Step 2
   market:       'Domestic - NSW / VIC / QLD',
   pallets: [
     {
-      palletSpace: 'PLT-2026-014-01',
       noOfSpaces:  1,
       storageTemp: '5°C - 10°C',
       cheps:       2,
@@ -1901,7 +1927,6 @@ const SAMPLE_REQUEST = {
       ],
     },
     {
-      palletSpace: 'PLT-2026-014-02',
       noOfSpaces:  1,
       storageTemp: '5°C - 10°C',
       cheps:       2,
@@ -1964,10 +1989,38 @@ const StepDots = ({ step, total }) => (
 );
 
 const ReceivingFormScreen = ({ navigate, appData }) => {
-  const order = appData.selectedOrder || SAMPLE_ORDERS[0];
-  const req = SAMPLE_REQUEST;
+  const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
+  const pallet = palletOf(appData, order);
+  const req    = SAMPLE_REQUEST;
   const [step, setStep] = React.useState(1);
   const TOTAL = 4;
+
+  // Receiving happens ONE PALLET AT A TIME. The operator scanned a specific
+  // pallet, so this form reviews that pallet - not every pallet on the order.
+  // Identity and the commodity list come from the scanned pallet; the extra
+  // customer-submitted detail (spaces, cheps, cartons, grower, pulp temps)
+  // comes from the request template so the layout stays representative.
+  const allPallets = orderPallets(order);
+  const palletNo   = Math.max(1, allPallets.findIndex(p => p.id === pallet.id) + 1);
+  // Pallets already past the Received step, i.e. genuinely checked in. This is
+  // real progress, unlike the pallet's ordinal position in the order.
+  const receivedCount = allPallets.filter(p => STEP_OF(p) > 1).length;
+  const tmpl       = req.pallets[(palletNo - 1) % req.pallets.length];
+  const viewPallets = [{
+    id:          pallet.id,
+    noOfSpaces:  tmpl.noOfSpaces,
+    storageTemp: tmpl.storageTemp,
+    cheps:       tmpl.cheps,
+    cartons:     tmpl.cartons,
+    commodities: pallet.items.map((it, i) => {
+      const c = tmpl.commodities[i % tmpl.commodities.length];
+      return {
+        commodity: it.name, lot: it.lot, cartons: it.qty,
+        grower: c.grower, cheps: c.cheps,
+        pulpMin: c.pulpMin, pulpMax: c.pulpMax, address: c.address,
+      };
+    }),
+  }];
 
   // Step 5 - on-arrival capture (operator input)
   const [extraFiles, setExtraFiles] = React.useState([]);
@@ -1977,7 +2030,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
   const addExtra     = () => setExtraFiles(f => [...f, { id: Date.now() + Math.random(), name: `RA-Doc-${String(f.length + 1).padStart(3, '0')}.jpg`, size: '1.2 MB' }]);
   const removeExtra  = (id) => setExtraFiles(f => f.filter(x => x.id !== id));
 
-  // Edit data flow — per-step editable fields. Only fields that are EDITABLE in the
+  // Edit data flow - per-step editable fields. Only fields that are EDITABLE in the
   // Steritech portal's Domestic ICA-55 form are shown here; portal-locked / system
   // fields (company info, pallet spaces, CHEPs, pallet cartons, expected delivery) stay read-only.
   const [showEdit, setShowEdit] = React.useState(false);
@@ -2087,7 +2140,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
           <>
             <SectionTitle title="Company info" />
             <Card style={{ padding: '14px 16px', marginBottom: 12 }}>
-              <ReadRow label="Company" value={req.company}/>
+              <ReadRow label="Company" value={order.customer}/>
               <ReadGrid items={[
                 { label: 'Contact name', value: req.contact },
                 { label: 'Mobile',       value: req.mobile },
@@ -2098,10 +2151,10 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
             <SectionTitle title="Order details" />
             <Card style={{ padding: '14px 16px' }}>
               <ReadGrid items={[
+                { label: 'Order',           value: order.id, mono: true },
                 { label: 'Purchase order',  value: req.poNumber, mono: true },
                 { label: 'ETA',             value: req.eta },
-                { label: 'Pallet spaces',   value: req.palletSpaces },
-                { label: 'CHEPs',           value: req.cheps },
+                { label: 'Pallet spaces',   value: allPallets.length },
               ]}/>
             </Card>
           </>
@@ -2115,15 +2168,22 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
               <ReadRow label="Destination market" value={req.market}/>
             </Card>
 
-            <SectionTitle title={`Pallets (${req.pallets.length})`} />
+            {/* The heading carries real progress (how much of the order is
+                already through receiving). The pallet's position in the order
+                is only an identifier, so it sits small inside the card below -
+                as a heading it reads like a wizard counter and collides with
+                the "STEP 2 OF 4" above. */}
+            <SectionTitle
+              title="Scanned pallet"
+              subtitle={`${receivedCount} of ${allPallets.length} pallet${allPallets.length !== 1 ? 's' : ''} on this order already received`} />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {req.pallets.map((p, pi) => (
-                <Card key={pi} style={{ padding: 0, overflow: 'hidden' }}>
+              {viewPallets.map((p, pi) => (
+                <Card key={p.id} style={{ padding: 0, overflow: 'hidden' }}>
                   <div style={{ background: '#F8FAFC', padding: '10px 14px', borderBottom: `1px solid ${C.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 14, fontWeight: 700, color: C.text }}>
-                      Pallet {pi + 1}
+                    <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                      Pallet {palletNo} of {allPallets.length}
                     </div>
-                    <PalletChip id={p.palletSpace}/>
+                    <PalletChip id={p.id}/>
                   </div>
                   <div style={{ padding: '12px 14px', borderBottom: `1px solid ${C.border}` }}>
                     <ReadGrid items={[
@@ -2142,14 +2202,17 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                         background: '#FAFBFC', borderRadius: 10, border: `1px solid ${C.border}`,
                         padding: '10px 12px', marginBottom: 8,
                       }}>
-                        <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 8 }}>
+                        <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 2 }}>
                           {c.commodity}
+                        </div>
+                        <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginBottom: 8 }}>
+                          {c.lot}
                         </div>
                         <ReadGrid items={[
                           { label: 'Grower',     value: c.grower },
                           { label: 'Cartons',    value: c.cartons },
                           { label: 'CHEPs',      value: c.cheps },
-                          { label: 'Pulp range', value: `${c.pulpMin} – ${c.pulpMax}` },
+                          { label: 'Pulp range', value: `${c.pulpMin} - ${c.pulpMax}` },
                         ]}/>
                         <ReadRow label="Address" value={c.address}/>
                       </div>
@@ -2392,9 +2455,9 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
             {step === 2 && (
               <>
                 <Field label="Destination market" value={ev('market', req.market)} onChange={e => setEV('market', e.target.value)} />
-                {req.pallets.map((p, pi) => (
-                  <div key={pi} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, marginTop: 4 }}>
-                    <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Pallet {pi + 1} · {p.palletSpace}</div>
+                {viewPallets.map((p, pi) => (
+                  <div key={p.id} style={{ borderTop: `1px solid ${C.border}`, paddingTop: 12, marginTop: 4 }}>
+                    <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Pallet {palletNo} of {allPallets.length} · {p.id}</div>
                     <Field label="No. of spaces" type="number" value={ev(`p${pi}_spaces`, String(p.noOfSpaces))} onChange={e => setEV(`p${pi}_spaces`, e.target.value)} />
                     <Select label="Storage temp" value={ev(`p${pi}_temp`, p.storageTemp)} onChange={e => setEV(`p${pi}_temp`, e.target.value)} options={[
                       { value: '', label: 'Select' },
@@ -2505,9 +2568,9 @@ const InStorageUnprocessedScreen = ({ navigate, appData }) => {
 
         <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
           <InfoRow label="Status" valueEl={<Badge state="RECEIVED" label="IN STORAGE - UNPROCESSED" />} />
-          <InfoRow label="Zone" value="Zone A - Bay 04" />
+          <InfoRow label="Zone" value={appData.binLocation || binLabel(palletOf(appData, order))} />
           <InfoRow label="Customer" value={order.customer} />
-          <InfoRow label="Product" value={order.product} />
+          <InfoRow label="Product" value={palletProductLabel(palletOf(appData, order))} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={stream} />} />
           <InfoRow label="Received" value={order.date} />
         </Card>
@@ -2544,8 +2607,10 @@ const ScanBinStagingScreen = ({ navigate, appData }) => {
 Object.assign(window, {
   SAMPLE_ORDERS, ALL_PALLETS, DEFAULT_PALLET, DEFAULT_PALLET_ID, DEFAULT_PALLET_ORDER,
   STEP_OF, orderPallets, orderWeight, orderItemCount, orderStep, orderState,
-  palletsPastQA, palletsByState, stateLabel, palletOf, palletAction, palletNextScreen,
-  orderOfPallet, targetDose,
+  palletsPastQA, palletsByState, stateLabel, palletProductLabel, treatmentSpec,
+  binForState, binLabel, stamp,
+  palletOf, palletAction, palletNextScreen,
+  orderOfPallet,
   PalletRowCard, PalletGroupSection,
   SplashScreen, ScanEmployeeScreen, DashboardScreen, OrderDetailScreen, PalletDetailScreen,
   TIMELINE_STEPS, STATE_TO_STEP, KPI,
@@ -2701,6 +2766,7 @@ const StagingPackingScreen = ({ navigate, appData }) => {
 
 // ── Treatment Active ──────────────────────────
 const TreatmentActiveScreen = ({ navigate, appData }) => {
+  const order = appData.selectedOrder || SAMPLE_ORDERS[0];
   const type = appData.treatmentType || 'irradiation';
   const [processed, setProcessed] = React.useState(false);
 
@@ -2762,9 +2828,9 @@ const TreatmentActiveScreen = ({ navigate, appData }) => {
 
         <Card style={{ padding: '14px 16px' }}>
           <InfoRow label="Treatment Type" valueEl={<StreamBadge stream={type} />} />
-          <InfoRow label="Started" value="Apr 28, 2026 - 07:14" />
+          <InfoRow label="Started" value={stamp(order, '07:14')} />
           <InfoRow label="Chamber / Line" value={type === 'eto' ? 'CH-03' : type === 'packing' ? 'LINE-04' : 'Conveyor B'} />
-          <InfoRow label="Target Dose / Cycle" value={type === 'irradiation' ? '25 – 45 kGy' : type === 'eto' ? 'Standard 12hr' : 'Blister Pack'} />
+          <InfoRow label={treatmentSpec(type).label} value={treatmentSpec(type).value} />
         </Card>
       </div>
     </PageWrapper>
@@ -2902,11 +2968,11 @@ const InStorageProcessedScreen = ({ navigate, appData }) => {
 
         <Card style={{ padding: '14px 16px' }}>
           <InfoRow label="Status" valueEl={<Badge state="IN_STORAGE_PROCESSED" label="PROCESSED - AWAITING QA" />} />
-          <InfoRow label="Zone" value={appData.binLocation || 'Zone C - Bay 02'} />
+          <InfoRow label="Zone" value={appData.binLocation || binLabel(palletOf(appData, order))} />
           <InfoRow label="Customer" value={order.customer} />
-          <InfoRow label="Product" value={order.product} />
+          <InfoRow label="Product" value={palletProductLabel(palletOf(appData, order))} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={appData.stream || order.stream || 'irradiation'} />} />
-          <InfoRow label="Process-Out" value="Apr 28, 2026 - 14:32" />
+          <InfoRow label="Process-Out" value={stamp(order, '14:32')} />
         </Card>
       </div>
     </PageWrapper>
@@ -2935,7 +3001,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
       icon: <path d="M20 6L9 17l-5-5"/>,
       title: 'QA Released',
       sub: isQA
-        ? 'Pallet cleared. QA is done here — it now returns to the operator for dispatch.'
+        ? 'Pallet cleared. QA is done here - it now returns to the operator for dispatch.'
         : 'Pallet is cleared by QA and handed back to you. Ready for dispatch.',
       badge: { state: 'QA_RELEASED', label: 'QA RELEASED' },
     },
@@ -2944,7 +3010,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
       icon: <><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></>,
       title: 'QA Hold Raised',
       sub: isQA
-        ? 'PDR raised. QA is done here — the pallet returns to the operator, blocked until cleared.'
+        ? 'PDR raised. QA is done here - the pallet returns to the operator, blocked until cleared.'
         : 'A PDR has been raised by QA. This pallet cannot proceed until cleared.',
       badge: { state: 'QA_HOLD', label: 'QA HOLD' },
     },
@@ -2956,12 +3022,12 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
     // QA only does QA: once released the pallet hands back to the operator.
     // QA exits to dashboard; the original operator picks it up and dispatches.
     bottom = isQA
-      ? <Btn label="Done — Back to Dashboard" onClick={() => navigate('dashboard')} color="blue" large />
+      ? <Btn label="Done - Back to Dashboard" onClick={() => navigate('dashboard')} color="blue" large />
       : <Btn label="Begin Dispatch →" onClick={() => navigate('packing')} color="green" large />;
   } else if (qaState === 'hold') {
     // QA's part is done after raising the PDR; the operator handles the hold.
     bottom = isQA
-      ? <Btn label="Done — Back to Dashboard" onClick={() => navigate('dashboard')} color="blue" large />
+      ? <Btn label="Done - Back to Dashboard" onClick={() => navigate('dashboard')} color="blue" large />
       : <Btn label="View QA Hold Details" onClick={() => navigate('qa_hold', { pdrReference: 'PDR-2026-007' })} color="darkRed" large />;
   } else if (isQA) {
     // QA reviewer: action buttons
@@ -3034,13 +3100,13 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
           <InfoRow label="Pallet ID" value={appData.palletId || DEFAULT_PALLET_ID} />
           <InfoRow label="Customer" value={order.customer} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={appData.stream || order.stream || 'irradiation'} />} />
-          <InfoRow label="Process-Out" value="Apr 28, 2026 - 14:32" />
+          <InfoRow label="Process-Out" value={stamp(order, '14:32')} />
           {qaState !== 'pending' && <InfoRow label="QA Reviewer" value="Sarah Mitchell" />}
-          {qaState !== 'pending' && <InfoRow label="Reviewed At" value="Apr 28, 2026 - 16:08" />}
+          {qaState !== 'pending' && <InfoRow label="Reviewed At" value={stamp(order, '16:08')} />}
           {qaState !== 'pending' && <InfoRow label="Returned to" value={`${order.assignee || 'Operator'} (operator)`} />}
         </Card>
 
-        {/* Explicit hand-back confirmation — QA's part ends here */}
+        {/* Explicit hand-back confirmation - QA's part ends here */}
         {qaState !== 'pending' && (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 14,
@@ -3055,7 +3121,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
           </div>
         )}
 
-        {/* Demo state switcher — QA only. Operators don't set QA state;
+        {/* Demo state switcher - QA only. Operators don't set QA state;
             they see Released/Hold pallets via the dashboard filters instead. */}
         {isQA && (
           <div style={{
@@ -3085,13 +3151,11 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
 
 // ── Packing ───────────────────────────────────
 const PackingScreen = ({ navigate, appData }) => {
-  const order = appData.selectedOrder || SAMPLE_ORDERS[0];
+  const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
+  const pallet = palletOf(appData, order);
   const [packed, setPacked] = React.useState(false);
-  const items = [
-    { name: 'Surgical Instruments - Class II', qty: 48 },
-    { name: 'Sterile Packaging Pouches',        qty: 200 },
-    { name: 'Indicator Strips',                 qty: 120 },
-  ];
+  // Pack what is on the scanned pallet, not a fixed demo list.
+  const items = pallet.items;
 
   return (
     <PageWrapper title="Packing" onBack={() => navigate('qa_status')}
@@ -3183,7 +3247,7 @@ const QAHoldScreen = ({ navigate, appData }) => {
           <InfoRow label="Pallet ID" value={appData.palletId || DEFAULT_PALLET_ID} />
           <InfoRow label="Customer" value={order.customer} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={appData.stream || order.stream || 'irradiation'} />} />
-          <InfoRow label="Raised" value="Apr 28, 2026 - 15:01" />
+          <InfoRow label="Raised" value={stamp(order, '15:01')} />
         </Card>
 
         <div style={{
@@ -3235,10 +3299,10 @@ const DispatchScreen = ({ navigate, appData }) => {
           <InfoRow label="Pallet ID" value={appData.palletId || DEFAULT_PALLET_ID} bold />
           <InfoRow label="Order ID" value={order.id} />
           <InfoRow label="Customer" value={order.customer} />
-          <InfoRow label="Product" value={order.product} />
+          <InfoRow label="Product" value={palletProductLabel(palletOf(appData, order))} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={appData.stream || order.stream || 'irradiation'} />} />
           <InfoRow label="Weight" value={`${palletOf(appData, order).weight} kg`} />
-          <InfoRow label="QA Released" value="Apr 28, 2026 - 16:20" />
+          <InfoRow label="QA Released" value={stamp(order, '16:20')} />
         </Card>
 
         <div style={{
@@ -3583,7 +3647,7 @@ function App() {
     supervisorName: '',
     overrideNotes: '',
     pdrReference: null,
-    binLocation: 'Zone A - Bay 04',
+    binLocation: DEFAULT_PALLET.bin,
   });
 
   const navigate = React.useCallback((s, updates = {}) => {
