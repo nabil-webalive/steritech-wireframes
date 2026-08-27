@@ -521,16 +521,28 @@ Object.assign(window, {
 //                             "Product Lines" - pallet labels are printed per
 //                             product line, and item-level capture hangs off them.
 // ═════════════════════════════════════════════════════════════════════════════
-// From Steritech's 2026-08-19 "Scan App Workflow" (IRR sheet):
+// From Steritech's 2026-08-19 "Scan App Workflow" (IRR sheet), corrected by the
+// client call on 2026-08-25:
 //
-//   LOT NUMBER   Steritech's own internal reference for a consignment. NOT a
-//                per-item lot: it groups the pallets of one order, it is printed
-//                on every pallet label, and the Steritech status only advances
-//                once every pallet carrying that lot has cleared the step. So it
-//                lives on the ORDER and the pallets inherit it.
-//   PRIORITY     Process-in and process-out are worked from a priority-ordered
-//                list, and several lots can share one priority level. Priority
-//                therefore lives on the order and drives those screens.
+//   LOT NUMBER   The SAME value as the order number. Ben: "lot numbers are order
+//                numbers ... identical". Only the wording differs, and the other
+//                sites already say "lot number", so Steritech took their word
+//                rather than imposing its own. Which of the two names the app
+//                should standardise on is still open and follows whatever
+//                Business Central calls it, so the label reads "Lot / Order
+//                Number" until that is settled.
+//                Business Central issues it when the portal request reaches it,
+//                so it exists before the pallet arrives and before any label is
+//                printed. It groups the pallets of one order and they inherit it.
+//   PRIORITY     A NUMBER in Steritech's schedule, not a High/Normal/Low band.
+//                Steritech assigns it at the SCHEDULING step, never the customer,
+//                and the customer must never see it. Released to the schedule at
+//                a default of 50 so a job can be moved either way, then
+//                re-ordered by hand as urgent work lands. Lower number is worked
+//                first today, but Ben said that could be inverted, so the
+//                direction is flagged rather than assumed. Ties are normal -
+//                everything starts on 50 - and that is what "same priority
+//                level" means.
 //   SUB-STREAM   Irradiation is not one form. Fresh Produce Domestic, Fresh
 //                Produce Export, Biosecurity/General and Medical each capture
 //                different fields at arrival. Beehives is listed by Steritech
@@ -654,8 +666,8 @@ const binForState = (state, n) => {
 // Builds a large pallet set from a list of states. Real orders are not always
 // 1-3 pallets - a single request can land as 20+, so the UI has to hold up.
 // Each pallet carries product LINES (reference + carton quantity). The lot
-// number is not repeated here: it belongs to the order and every pallet on that
-// order shares it.
+// number is not repeated here, and there is no lotNumber field on the order
+// either: it IS the order number, so it is read from the order id.
 const bulkPallets = (prefix, product, code, states) => states.map((state, i) => {
   const nn = String(i + 1).padStart(2, '0');
   return {
@@ -676,8 +688,8 @@ const SAMPLE_ORDERS = [
     // stream, and its pallets sit at Received so the arrival flow is the first
     // thing the demo lands on.
     id: 'ORD-2026-048', customer: 'NSW Fresh Produce Pty Ltd', stream: 'irradiation',
-    subStream: 'fresh_domestic', lotNumber: 'LOT-2026-0481', po: 'PO-2026-04412',
-    priority: 1, date: 'Apr 30', assignee: 'Pan Xiao',
+    subStream: 'fresh_domestic', po: 'PO-2026-04412',
+    priority: 38, date: 'Apr 30', assignee: 'Pan Xiao',
     storageHandling: ['Keep 5 C to 10 C', 'Do not stack above two high'],
     submitted: {
       'Number of Spaces': 3,
@@ -704,8 +716,8 @@ const SAMPLE_ORDERS = [
     // Fresh Produce Export. Same commodities, different paperwork - freight
     // forwarder and RFP instead of an ICA-55 date code.
     id: 'ORD-2026-047', customer: 'Riverina Export Fruit', stream: 'irradiation',
-    subStream: 'fresh_export', lotNumber: 'LOT-2026-0472', po: 'PO-2026-04407',
-    priority: 2, date: 'Apr 30', assignee: 'Liam Carter',
+    subStream: 'fresh_export', po: 'PO-2026-04407',
+    priority: 50, date: 'Apr 30', assignee: 'Liam Carter',
     storageHandling: ['Keep 1 C to 4 C'],
     submitted: {
       'Number of Spaces': 2,
@@ -726,23 +738,26 @@ const SAMPLE_ORDERS = [
   {
     // 20 pallets on one order - the stress case for every list in this app.
     id: 'ORD-2026-046', customer: 'Meridian Health Group', stream: 'irradiation',
-    subStream: 'medical', lotNumber: 'LOT-2026-0461', po: 'PO-2026-04446',
-    priority: 2, date: 'Apr 29', assignee: 'Liam Carter',
+    subStream: 'medical', po: 'PO-2026-04446',
+    priority: 50, date: 'Apr 29', assignee: 'Liam Carter',
     storageHandling: ['Ambient, keep dry'],
     submitted: { 'RPI': 'RPI-4471', 'Dose Range': '25 - 45 kGy' },
+    // The 20-pallet scale case, and the lot that shows process out WORKING: every
+    // pallet is processed in, so the gate is open and the nine still in treatment
+    // can be scanned out one at a time.
     pallets: bulkPallets('PLT-2026-046', 'Nitrile Examination Gloves', 'PRD-1180', [
       'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED',
       'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'PROCESS_OUT', 'PROCESS_OUT',
       'PROCESS_OUT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT',
-      'STAGED', 'STAGED', 'RECEIVED', 'RECEIVED', 'RECEIVED',
+      'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT',
     ]),
   },
   {
     // Beehives. The workbook lists the row and leaves it completely empty, so
     // this order exists to prove the app says so instead of inventing fields.
     id: 'ORD-2026-045', customer: 'Highland Apiaries', stream: 'irradiation',
-    subStream: 'beehives', lotNumber: 'LOT-2026-0453', po: 'PO-2026-04445',
-    priority: 3, date: 'Apr 29', assignee: 'Liam Carter',
+    subStream: 'beehives', po: 'PO-2026-04445',
+    priority: 58, date: 'Apr 29', assignee: 'Liam Carter',
     storageHandling: ['Ambient, keep dry'],
     submitted: {},
     pallets: [
@@ -756,8 +771,8 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-041', customer: 'MedTech Australia', stream: 'irradiation',
-    subStream: 'medical', lotNumber: 'LOT-2026-0412', po: 'PO-2026-04441',
-    priority: 1, date: 'Apr 28', assignee: 'Pan Xiao',
+    subStream: 'medical', po: 'PO-2026-04441',
+    priority: 38, date: 'Apr 28', assignee: 'Pan Xiao',
     storageHandling: ['Ambient, keep dry'],
     submitted: { 'RPI': 'RPI-4482', 'Dose Range': '25 - 45 kGy' },
     pallets: [
@@ -775,8 +790,8 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-038', customer: 'BioPharma Ltd', stream: 'eto',
-    subStream: null, lotNumber: 'LOT-2026-0381', po: 'PO-2026-04438',
-    priority: 2, date: 'Apr 27', assignee: 'Pan Xiao',
+    subStream: null, po: 'PO-2026-04438',
+    priority: 50, date: 'Apr 27', assignee: 'Pan Xiao',
     storageHandling: ['Ambient, keep dry'],
     pallets: [
       { id: 'PLT-2026-038-01', state: 'STAGED', weight: 88, bin: 'Zone B - Stage 01', items: [
@@ -787,8 +802,8 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-035', customer: 'SurgiCare Corp', stream: 'irradiation',
-    subStream: 'medical', lotNumber: 'LOT-2026-0352', po: 'PO-2026-04435',
-    priority: 3, date: 'Apr 26', assignee: 'Liam Carter',
+    subStream: 'medical', po: 'PO-2026-04435',
+    priority: 58, date: 'Apr 26', assignee: 'Liam Carter',
     storageHandling: ['Ambient, keep dry'],
     submitted: { 'RPI': 'RPI-4490', 'Dose Range': '25 - 45 kGy' },
     pallets: [
@@ -804,15 +819,17 @@ const SAMPLE_ORDERS = [
       { id: 'PLT-2026-035-04', state: 'IN_TREATMENT', weight: 62, bin: 'Zone D - Cell 1', items: [
         { name: 'Sterile Gloves - Size XL', code: 'PRD-1203', qty: 320 },
       ]},
-      { id: 'PLT-2026-035-05', state: 'STAGED',       weight: 62, bin: 'Zone B - Stage 07', items: [
+      // Was STAGED. Two pallets on this lot are already out, which the
+      // all-or-nothing rule only allows if every pallet is in.
+      { id: 'PLT-2026-035-05', state: 'IN_TREATMENT', weight: 62, bin: 'Zone D - Cell 2', items: [
         { name: 'Sterile Gloves - Size M', code: 'PRD-1201', qty: 400 },
       ]},
     ],
   },
   {
     id: 'ORD-2026-031', customer: 'HealthPlus Group', stream: 'packing',
-    subStream: null, lotNumber: 'LOT-2026-0311', po: 'PO-2026-04431',
-    priority: 2, date: 'Apr 25', assignee: 'Pan Xiao',
+    subStream: null, po: 'PO-2026-04431',
+    priority: 50, date: 'Apr 25', assignee: 'Pan Xiao',
     storageHandling: ['Ambient'],
     pallets: [
       { id: 'PLT-2026-031-01', state: 'PROCESS_OUT', weight: 48, bin: 'Zone C - Bay 05', items: [
@@ -825,8 +842,8 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-028', customer: 'NovaMed Supplies', stream: 'eto',
-    subStream: null, lotNumber: 'LOT-2026-0282', po: 'PO-2026-04428',
-    priority: 3, date: 'Apr 24', assignee: 'Pan Xiao',
+    subStream: null, po: 'PO-2026-04428',
+    priority: 62, date: 'Apr 24', assignee: 'Pan Xiao',
     storageHandling: ['Ambient'],
     pallets: [
       { id: 'PLT-2026-028-01', state: 'QA_RELEASED', weight: 51, bin: 'Zone C - Bay 08', items: [
@@ -845,8 +862,8 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-024', customer: 'CardioCare Health', stream: 'irradiation',
-    subStream: 'biosecurity', lotNumber: 'LOT-2026-0241', po: 'PO-2026-04424',
-    priority: 1, date: 'Apr 23', assignee: 'Pan Xiao',
+    subStream: 'biosecurity', po: 'PO-2026-04424',
+    priority: 45, date: 'Apr 23', assignee: 'Pan Xiao',
     storageHandling: ['Quarantine hold, do not break seal'],
     submitted: {
       'Biosecurity Direction': 'AFF-DIR-2026-3312',
@@ -865,8 +882,8 @@ const SAMPLE_ORDERS = [
   },
   {
     id: 'ORD-2026-019', customer: 'TerraCare Medical', stream: 'packing',
-    subStream: null, lotNumber: 'LOT-2026-0191', po: 'PO-2026-04419',
-    priority: 3, date: 'Apr 22', assignee: 'Liam Carter',
+    subStream: null, po: 'PO-2026-04419',
+    priority: 71, date: 'Apr 22', assignee: 'Liam Carter',
     storageHandling: ['Ambient'],
     pallets: [
       { id: 'PLT-2026-019-01', state: 'SHIPPED', weight: 52, bin: '', items: [
@@ -987,10 +1004,14 @@ const ScanEmployeeScreen = ({ navigate }) => {
 // open, and the lot gates count pallets at a specific one of these. Display folds
 // them onto the six via STERITECH_STATUS.
 const STATE_TO_STEP = {
-  // ARRIVED is the gap the first build missed. The workbook only turns the status
-  // to Received at column F, when the labels are printed, so a pallet that is on
-  // the dock but not yet labelled is still Created. It has no lot number on it
-  // and no bin, because both of those arrive later - the label at F, the bin at G.
+  // ARRIVED is the gap the first build missed: a pallet on the dock that has not
+  // been booked in yet. The 2026-08-25 call corrected WHEN it becomes Received.
+  // The workbook reads as though printing the label at column F is what does it.
+  // Ben said the opposite: "I think it's the opposite way. It prints a label once
+  // we've received it." Booking the pallet in is the action and the print is a
+  // consequence of it, so RECEIVED is set when the arrival form is submitted.
+  // The lot number is not waiting on the label either - Business Central issues
+  // it with the request. Only the bin arrives later, at column G.
   ARRIVED: 1, RECEIVED: 2, IN_STORAGE_UNPROCESSED: 3, STAGED: 4, IN_TREATMENT: 5,
   PROCESS_OUT: 6, IN_STORAGE_PROCESSED: 7, QA_HOLD: 7, QA_RELEASED: 8, SHIPPED: 9,
 };
@@ -1118,21 +1139,36 @@ const lineDose = (item, order) => {
 };
 
 // ── Lot number, priority and the dual status ────────────────────────────────
-// The lot number is an order fact, so a pallet reads it from its parent order
-// rather than storing its own copy - two copies is two things to get wrong.
-const lotOf = order => (order && order.lotNumber) || '-';
+// Lot number and order number are the SAME value - client, 2026-08-25: "lot
+// numbers, order numbers, identical" - so there is one field here and not two.
+// It is the order id, issued by Business Central when the portal request lands.
+// LOT_LABEL carries the wording because which of the two names Steritech
+// standardises on is still open and follows Business Central.
+const LOT_LABEL = 'Lot / Order Number';
+// Business Central does not always hand the number back straight away: the live
+// portal shows a dash against orders that are not linked yet. That is a real
+// state, so it is named rather than left reading as "this lot has no number".
+const LOT_PENDING = 'Waiting on Business Central';
+const lotOf   = order => (order && order.id) || '';
+const lotText = order => lotOf(order) || LOT_PENDING;
 const subStreamLabel = order =>
   (order && order.subStream && SUB_STREAMS[order.subStream]) || null;
 
-// Priority drives the process-in and process-out lists. Several lots can share
-// one level, so this is an ordering key, not a unique rank.
-const PRIORITY_META = {
-  1: { label: 'P1 - High',   bg: '#FEE2E2', color: '#991B1B' },
-  2: { label: 'P2 - Normal', bg: '#FEF3C7', color: '#92400E' },
-  3: { label: 'P3 - Low',    bg: '#E2E8F0', color: '#475569' },
-};
-const priorityOf = order => (order && order.priority) || 3;
-const priorityMeta = order => PRIORITY_META[priorityOf(order)] || PRIORITY_META[3];
+// Priority is a position in Steritech's schedule, set by them at the scheduling
+// step. Not three bands - a number, released at a default of 50 so it can be
+// moved either way, and re-ordered by hand when urgent work lands. Ties are
+// normal because everything starts on 50, so this is an ordering key and not a
+// unique rank.
+const PRIORITY_DEFAULT = 50;
+// Ben, 2026-08-25: "currently ours is lowest number is highest priority ... you
+// could invert it, whatever it is". Left as he described it, so if Steritech
+// inverts it there is exactly one line to change.
+const PRIORITY_LOWEST_IS_HIGHEST = true;
+const priorityOf    = order => (order && order.priority) || PRIORITY_DEFAULT;
+const priorityLabel = order => `Priority ${priorityOf(order)}`;
+// One comparator, so the direction is decided in one place and nowhere else.
+const byPriority = (a, b) =>
+  (PRIORITY_LOWEST_IS_HIGHEST ? 1 : -1) * (priorityOf(a) - priorityOf(b));
 
 // Steritech status is the internal one and is what this app shows. Customer
 // status is shown alongside it so an operator can see what the customer sees -
@@ -1152,10 +1188,19 @@ const lotGate = (order, step) => {
 };
 
 // The workbook gates the STATUS on all pallets being out of the process bin
-// (cell K3). It never gates one pallet's process-out on the rest of the lot
-// being processed in, and physically it cannot: a pallet is only scanned out of
-// the chamber it is already sitting in. So process-out stays per pallet, and the
-// lot is described instead - where all of its pallets currently sit.
+// (cell K3) and says nothing about gating the process-out SCAN. The 2026-08-25
+// call settled that. Asked whether one pallet can be processed out while the
+// rest of the lot is still not in, Ben said "for simplicity, keep it full order.
+// We have to receive it all for it to be collectively ready ... So all or
+// nothing for the moment." So the scan is held until the whole lot is in.
+//
+// He was explicit that this is interim - he and Simon had not worked through the
+// risks - and he named the case that will force a rethink: "we're receiving one
+// pallet 2 hours before the next one. How do we run it?" It is one helper so
+// that lifting the rule later is a one-line change.
+const lotAllProcessedIn = order => lotGate(order, 5).complete;
+// Where the rest of the lot sits. The counter alone reads as if the missing
+// pallets had gone somewhere unexplained.
 const processBinSplit = order => {
   const total = orderPallets(order).length;
   const out   = palletsAtOrPast(order, 6);
@@ -1171,18 +1216,18 @@ const processBinNote = order => {
 };
 
 // Priority is worked from, not just displayed - process-in and process-out both
-// order their lists by it, so it gets a chip of its own.
-const PriorityChip = ({ order }) => {
-  const m = priorityMeta(order);
-  return (
-    <span style={{
-      background: m.bg, color: m.color,
-      borderRadius: 6, padding: '3px 8px',
-      fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700,
-      letterSpacing: '0.5px', display: 'inline-block', whiteSpace: 'nowrap',
-    }}>{m.label}</span>
-  );
-};
+// order their lists by it, so it gets a chip of its own. One neutral style: a
+// schedule number has no band to colour, and the only distinction Ben asked for
+// was between the job in action and what is next, which the queue lists carry.
+const PriorityChip = ({ order, current = false }) => (
+  <span style={{
+    background: current ? '#FEE2E2' : '#E2E8F0',
+    color:      current ? '#991B1B' : '#475569',
+    borderRadius: 6, padding: '3px 8px',
+    fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700,
+    letterSpacing: '0.5px', display: 'inline-block', whiteSpace: 'nowrap',
+  }}>{priorityLabel(order)}</span>
+);
 
 // Steps the scanner does not own. Saying so on the pallet is better than leaving
 // a gap the operator has to explain to themselves.
@@ -1269,10 +1314,10 @@ const DashboardScreen = ({ navigate, appData }) => {
     // just because one pallet is still at Received.
     if (!orderPallets(o).some(p => stateMatches(p.state))) return false;
     if (!q) return true;
+    // Searching a pallet barcode, a product, a PO or a lot should all surface the
+    // order. Lot needs no clause of its own any more - it is the order id.
     return o.id.toLowerCase().includes(q)
       || o.customer.toLowerCase().includes(q)
-      // Searching a pallet barcode, a product or a lot should all surface the order.
-      || (o.lotNumber || '').toLowerCase().includes(q)
       || (o.po || '').toLowerCase().includes(q)
       || orderPallets(o).some(p => p.id.toLowerCase().includes(q)
         || p.items.some(it => it.name.toLowerCase().includes(q) || it.code.toLowerCase().includes(q)));
@@ -1280,8 +1325,9 @@ const DashboardScreen = ({ navigate, appData }) => {
   const sortedOrders = [...filteredOrders].sort((a, b) => {
     if (sort === 'status')   return orderStep(a) - orderStep(b);
     // Process-in and process-out are worked in priority order, so the list can
-    // be put in the same order the floor actually works it.
-    if (sort === 'priority') return priorityOf(a) - priorityOf(b) || orderStep(a) - orderStep(b);
+    // be put in the same order the floor actually works it. byPriority owns the
+    // direction, because Steritech may still invert the numbering.
+    if (sort === 'priority') return byPriority(a, b) || orderStep(a) - orderStep(b);
     return b.id.localeCompare(a.id);
   });
 
@@ -1292,12 +1338,11 @@ const DashboardScreen = ({ navigate, appData }) => {
     return p.id.toLowerCase().includes(q)
       || p.order.id.toLowerCase().includes(q)
       || p.order.customer.toLowerCase().includes(q)
-      || (p.order.lotNumber || '').toLowerCase().includes(q)
       || p.items.some(it => it.name.toLowerCase().includes(q) || it.code.toLowerCase().includes(q));
   });
   const sortedPallets = [...filteredPallets].sort((a, b) => {
     if (sort === 'status')   return STEP_OF(a) - STEP_OF(b);
-    if (sort === 'priority') return priorityOf(a.order) - priorityOf(b.order) || STEP_OF(a) - STEP_OF(b);
+    if (sort === 'priority') return byPriority(a.order, b.order) || STEP_OF(a) - STEP_OF(b);
     return b.id.localeCompare(a.id);
   });
 
@@ -1446,11 +1491,11 @@ const DashboardScreen = ({ navigate, appData }) => {
                     operator actually handles it. */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
                   <div>
-                    <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 16, fontWeight: 700, color: C.text }}>{order.id}</div>
+                    {/* One identifier, not two. The heading IS the lot number -
+                        they are the same value - so a separate lot line under it
+                        printed the same string twice. */}
+                    <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 16, fontWeight: 700, color: C.text }}>{lotText(order)}</div>
                     <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2 }}>{order.customer}</div>
-                    {/* The lot number is how Steritech refers to this consignment
-                        internally, so it belongs next to the order id. */}
-                    <div style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 11.5, color: C.brand, marginTop: 3 }}>{lotOf(order)}</div>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                     <StreamBadge stream={order.stream} />
@@ -1600,9 +1645,9 @@ const DashboardScreen = ({ navigate, appData }) => {
 // six for display.
 const TIMELINE_STEPS = [
   { key: 'created',    label: 'Created',    desc: 'Customer submitted the request in the portal', owner: 'Portal' },
-  { key: 'received',   label: 'Received',   desc: 'Labels printed, pallet checked in and stored' },
+  { key: 'received',   label: 'Received',   desc: 'Booked in on arrival; the label prints, then the pallet is stored' },
   { key: 'processing', label: 'Processing', desc: 'Processed in per the schedule' },
-  { key: 'qa_review',  label: 'QA Review',  desc: 'Processed out, waiting on QA' },
+  { key: 'qa_review',  label: 'QA Review',  desc: 'Whole order processed out, waiting on QA in Business Central' },
   { key: 'released',   label: 'Released',   desc: 'QA review complete', owner: 'BC' },
   { key: 'dispatched', label: 'Dispatched', desc: 'Dispatch steps not confirmed yet', owner: 'TBC' },
 ];
@@ -1682,9 +1727,10 @@ const PalletGroupSection = ({ group, onOpen }) => {
 };
 
 
-// Next action for a single PALLET. The workflow instance lives on the pallet,
-// so this is keyed off pallet.state - never off the order.
-const palletAction = (pallet, isQA) => {
+// Next action for a single PALLET. The workflow instance lives on the pallet, so
+// this is keyed off pallet.state - never off the order. The order is still passed
+// in because ONE rule is lot-wide: process out waits for the whole lot to be in.
+const palletAction = (pallet, isQA, order) => {
   // Column M is "QA review (BC operation)" with Scanner Data Fields = N/A, so
   // neither role acts here. Both roles get the same read-only view.
   const qaLabel = 'View QA Review →';
@@ -1693,7 +1739,12 @@ const palletAction = (pallet, isQA) => {
     case 'RECEIVED':               return isQA ? null : { label: 'Check In and Store →', screen: 'scan_bin' };
     case 'IN_STORAGE_UNPROCESSED': return isQA ? null : { label: 'Process In →',         screen: 'process_in' };
     case 'STAGED':                 return isQA ? null : { label: 'Process In →',         screen: 'process_in' };
-    case 'IN_TREATMENT':           return isQA ? { label: 'Process Out →',       screen: 'process_out' } : null;
+    // Process out is the OPERATOR's scan, not QA's. Client, 2026-08-25: "QA
+    // review is generally a BC operation. That'll be a desktop action. They pull
+    // the batch records." QA never touches the scanner for this step. The scan is
+    // held until every pallet on the lot is in - see lotAllProcessedIn.
+    case 'IN_TREATMENT':           return (isQA || !lotAllProcessedIn(order)) ? null
+                                     : { label: 'Process Out →',       screen: 'process_out' };
     case 'PROCESS_OUT':            return { label: qaLabel,                      screen: 'qa_status' };
     case 'IN_STORAGE_PROCESSED':   return { label: qaLabel,                      screen: 'qa_status' };
     // QA only does QA - once released, packing/dispatch returns to the operator.
@@ -1749,7 +1800,11 @@ const OrderDetailScreen = ({ navigate, appData }) => {
               commodities; they belong on the pallets, listed below. */}
           <div>
             <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text }}>{order.customer}</div>
-            <div style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12, color: C.brand, marginTop: 3 }}>{lotOf(order)}</div>
+            {/* The NavBar title above already carries the identifier, so this
+                line names what it IS rather than repeating the value. */}
+            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 3 }}>
+              {LOT_LABEL}
+            </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <StreamBadge stream={order.stream} />
@@ -1786,7 +1841,9 @@ const OrderDetailScreen = ({ navigate, appData }) => {
             Detail, and the stream is already a badge at the top of this screen. */}
         <SectionTitle title="Order details" />
         <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
-          <InfoRow label="Lot Number" value={lotOf(order)} bold />
+          {/* Lot and order are the same value, and the name Steritech will
+              standardise on is still open, so the label says both. */}
+          <InfoRow label={LOT_LABEL} value={lotText(order)} bold={!!lotOf(order)} />
           {/* The workbook's scanner field list carries Steritech Status and
               nothing else. Customer Status is its legend row, describing what the
               portal shows - not something this app is meant to display. */}
@@ -1832,7 +1889,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   const step      = STEP_OF(pallet);
   const isShipped = pallet.state === 'SHIPPED';
   const isQA      = appData.role === 'qa';
-  const action    = palletAction(pallet, isQA);
+  const action    = palletAction(pallet, isQA, order);
   // A pallet sitting in a warehouse can be relocated whenever, but one inside a
   // chamber or already off site cannot.
   // G3 allows a bin move in the unprocessed warehouse, K3 in the processed one.
@@ -1862,7 +1919,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   // is one of those is finished as far as this role is concerned.
   const isWork = a => !!a && !['qa_status', 'qa_hold'].includes(a.screen);
   const lotPending = orderPallets(order)
-    .filter(p => p.id !== pallet.id && isWork(palletAction(p, isQA)));
+    .filter(p => p.id !== pallet.id && isWork(palletAction(p, isQA, order)));
   // So the rest of the lot is the real next move, and the list belongs on screen
   // whenever this pallet has nothing left for this role to do. Only a button
   // that actually advances a pallet earns the screen to itself.
@@ -1871,13 +1928,17 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   // Read-only footers. Each is a state where this role has nothing to scan, so
   // the screen has to say WHY there is no button rather than just show none.
   const notice =
-    (isQA && ['ARRIVED', 'RECEIVED', 'IN_STORAGE_UNPROCESSED', 'STAGED'].includes(pallet.state))
+    // IN_TREATMENT is in this list now. Process out moved to the operator, so
+    // there is no scanner step left anywhere in the warehouse run for QA.
+    (isQA && ['ARRIVED', 'RECEIVED', 'IN_STORAGE_UNPROCESSED', 'STAGED', 'IN_TREATMENT'].includes(pallet.state))
       ? { bg: '#F1F5F9', bd: C.border, fg: C.muted, stroke: C.muted,
           text: 'Warehouse step. Nothing for QA to do on this pallet yet.',
           icon: <><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></> } :
-    (!isQA && pallet.state === 'IN_TREATMENT')
+    // The pallet is treated and ready, but the lot is not. Naming how many are
+    // still out is the difference between a rule and a dead button.
+    (!isQA && pallet.state === 'IN_TREATMENT' && !lotAllProcessedIn(order))
       ? { bg: '#FEF3C7', bd: '#FDE68A', fg: '#92400E', stroke: '#92400E',
-          text: 'Waiting on QA to process this pallet out.',
+          text: `Process out is held until the whole lot is processed in - ${lotGate(order, 5).done} of ${lotGate(order, 5).total} pallets are in.`,
           icon: <><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></> } :
     (isQA && pallet.state === 'QA_RELEASED')
       ? { bg: '#DCFCE7', bd: '#86EFAC', fg: '#15803D', stroke: C.green,
@@ -1897,7 +1958,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
                 has no such field. The pallet id is the screen title and the lines
                 are listed in full further down. */}
             <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, fontWeight: 600 }}>
-              {order.id}
+              {lotText(order)}
             </div>
             <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>{order.customer}</div>
           </div>
@@ -1994,12 +2055,11 @@ const PalletDetailScreen = ({ navigate, appData }) => {
               Pallet ID, Order, Weight and Stream were all being shown here and
               none of them is in column B. The pallet id is the screen title and
               the order and stream are in the header, so nothing is lost. */}
-          {/* The lot number is printed on the label at column F and the bin is
-              written at column G, so neither exists on a pallet that is still on
-              the dock. Showing them there would be inventing data. */}
-          {preLabel
-            ? <InfoRow label="Lot Number" value="Assigned when the label is printed" />
-            : <InfoRow label="Lot Number" value={lotOf(order)} bold />}
+          {/* The lot number does NOT wait for the label. It is the order number
+              and Business Central issues it when the portal request arrives, so a
+              pallet still sitting on the dock already carries it. Only the bin is
+              written later, at column G. */}
+          <InfoRow label={LOT_LABEL} value={lotText(order)} bold={!!lotOf(order)} />
           <InfoRow label="Customer Name" value={order.customer} />
           <InfoRow label="Customer PO" value={order.po || '-'} />
           <InfoRow label="Steritech Status" value={steritechStatus(pallet.state)} />
@@ -2476,6 +2536,63 @@ const ReadGrid = ({ items }) => (
   </div>
 );
 
+// ── Correctable customer field ───────────────────────────────────────────────
+// The first build had these rows locked, on the grounds that the workbook puts
+// the customer columns in VIEW mode. The 2026-08-25 call said otherwise. Ben:
+// "the blue fields here are additional information that the customer can't
+// provide. So I think it's that mix of, we want to be able to edit their
+// information ... if they're wrong." And: "the data from the customers, our start
+// position, and then we add the blue, and then along the way, it should build
+// that model until it's done."
+//
+// So a customer field is a STARTING POSITION, not a locked record. It is
+// correctable, and a correction has to stay visible as a correction - a silently
+// overwritten value would lose the fact that the customer said something else.
+const EditRow = ({ label, value, corrected, editing, onChange, mono = false }) => {
+  const changed = corrected !== undefined && corrected !== value;
+  const shown   = corrected !== undefined ? corrected : value;
+  return (
+    <div style={{ marginBottom: 12 }}>
+      <div style={{
+        display: 'flex', alignItems: 'baseline', gap: 6,
+        fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 600,
+        color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 3,
+      }}>
+        <span>{label}</span>
+        {changed && (
+          <span style={{
+            background: '#EEF2FF', color: '#4338CA', borderRadius: 4,
+            padding: '1px 5px', fontSize: 9.5, letterSpacing: 0.4,
+          }}>Corrected</span>
+        )}
+      </div>
+      {editing ? (
+        <input value={shown === undefined || shown === null ? '' : String(shown)}
+          onChange={e => onChange(e.target.value)}
+          style={{
+            width: '100%', boxSizing: 'border-box', padding: '8px 10px',
+            border: `1px solid ${C.brand}`, borderRadius: 8, background: '#fff',
+            fontFamily: mono ? 'ui-monospace,Menlo,monospace' : 'DM Sans,sans-serif',
+            fontSize: 14, color: C.text, outline: 'none',
+          }}/>
+      ) : (
+        <div style={{
+          fontFamily: mono ? 'ui-monospace,Menlo,monospace' : 'DM Sans,sans-serif',
+          fontSize: 14, color: C.text, fontWeight: 500, lineHeight: 1.4,
+        }}>
+          {shown || <span style={{ color: C.muted, fontStyle: 'italic' }}>-</span>}
+        </div>
+      )}
+      {/* What the customer actually submitted, kept on screen underneath. */}
+      {changed && !editing && (
+        <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted, marginTop: 3 }}>
+          Customer submitted: {value || '-'}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const StepDots = ({ step, total }) => (
   <div style={{ display: 'flex', gap: 6, padding: '12px 16px 14px', background: '#fff', borderBottom: `1px solid ${C.border}` }}>
     {[...Array(total)].map((_, i) => (
@@ -2573,6 +2690,15 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
   const [step, setStep] = React.useState(1);
   const TOTAL = 3;
 
+  // Corrections to what the customer submitted, keyed by field label. Held on
+  // the side rather than written over the order, so the row can show both the
+  // corrected value and what the customer originally sent.
+  const [corrections, setCorrections] = React.useState({});
+  const [editing, setEditing]         = React.useState(false);
+  const correct = (label, v) => setCorrections(c => ({ ...c, [label]: v }));
+  const correctedCount = Object.keys(corrections)
+    .filter(k => corrections[k] !== undefined).length;
+
   // Receiving happens ONE PALLET AT A TIME. The operator scanned a specific
   // pallet, so this form reviews that pallet - not every pallet on the order.
   // Identity and the product lines come from the scanned pallet; the extra
@@ -2646,16 +2772,25 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                         : f.prefill === 'storageTemp' ? tmpl.storageTemp || ''
                         : '';
 
-  // No edit sheet here on purpose. The workbook puts columns D and F in VIEW
-  // mode and only column E in EDIT, so everything the operator may change is in
-  // steps 3 and 4. An earlier version had an Edit button on the read-only steps
-  // that could change twelve customer-submitted fields, which the sheet does not
-  // authorise anywhere.
+  // Step 1 used to be fully locked because the workbook puts the customer columns
+  // in VIEW mode. Ben overrode that on 2026-08-25: Steritech has to be able to
+  // correct the customer's information where it is wrong. So step 1 is now
+  // read-only by DEFAULT with an explicit Correct toggle, rather than a form that
+  // invites edits - the customer's submission is still the record until someone
+  // deliberately changes it, and a change is labelled as a correction.
+  //
+  // Quantities are not corrected here. Cartons are counted per product line at
+  // step 2, which already has an editable carton field, so a second place to
+  // change the same number would be two sources of truth.
 
   const next = () => {
     if (step < TOTAL) { setStep(step + 1); return; }
-    // Arrival is complete, so the pallet labels can be printed. The bin scan
-    // comes AFTER the label, because the label is what gets scanned into a bin.
+    // BOOKING IN is what marks the pallet Received - not printing the label.
+    // Ben, 2026-08-25: "as it's received, it should mark it ... I think it's the
+    // opposite way. It prints a label once we've received it", and "when we
+    // receive the pallet, we book it in, it prints the labels." Submitting this
+    // form IS the book-in, so the state moves here and the labels follow.
+    advancePallet(pallet, 'RECEIVED', '');
     navigate('print_labels', {
       selectedOrder: { ...order, stream: order.stream || 'irradiation' },
       selectedPallet: pallet,
@@ -2663,6 +2798,9 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
       stream: order.stream || 'irradiation',
       palletState: 'RECEIVED',
       productLines: lines,
+      // Corrections travel with the pallet. A PO the operator fixed at arrival is
+      // the PO on the label, not the one the customer typed.
+      corrections,
     });
   };
   const back = () => {
@@ -2708,17 +2846,32 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.brand} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
               </svg>
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: '#312E81', marginBottom: 2 }}>
-                Read-only · submitted by customer
+                Submitted by customer
               </div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: '#4F46E5', lineHeight: 1.4 }}>
-                Verify the request, then continue receiving.
+                {editing
+                  ? 'Correct anything that does not match what arrived. The original stays on record.'
+                  : 'Verify against what arrived. Correct any field that is wrong, then continue.'}
               </div>
+              {correctedCount > 0 && (
+                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: '#312E81', marginTop: 5, fontWeight: 600 }}>
+                  {correctedCount} field{correctedCount === 1 ? '' : 's'} corrected by Steritech
+                </div>
+              )}
             </div>
+            {/* One toggle, not a pencil per row. The submission is the record
+                until someone deliberately decides to change it. */}
+            <button onClick={() => setEditing(e => !e)} style={{
+              flexShrink: 0, background: editing ? C.brand : '#fff',
+              color: editing ? '#fff' : C.brand, border: `1px solid ${C.brand}`,
+              borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
+              fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700,
+            }}>{editing ? 'Done' : 'Correct'}</button>
           </div>
 
         </div>
@@ -2735,15 +2888,27 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
           <>
             <SectionTitle title="Order" subtitle="Selected on the scanner" />
             <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
-              <ReadRow label="Customer Name" value={order.customer}/>
+              {/* Correctable: these are the customer's words and can be wrong. */}
+              <EditRow label="Customer Name" value={order.customer}
+                corrected={corrections['Customer Name']} editing={editing}
+                onChange={v => correct('Customer Name', v)}/>
+              <EditRow label="Customer PO" value={order.po} mono
+                corrected={corrections['Customer PO']} editing={editing}
+                onChange={v => correct('Customer PO', v)}/>
+              {/* NOT correctable: both are counted from the pallets in front of
+                  the operator, and cartons are already editable per line at
+                  step 2. A second input for the same number is a second truth. */}
               <ReadGrid items={[
-                { label: 'Customer PO',       value: order.po, mono: true },
                 { label: 'Number of Pallets', value: allPallets.length },
                 { label: 'Number of Cartons', value: orderCartons(order) },
               ]}/>
-              <ReadRow label="Request Storage and Handling Conditions"
-                value={(order.storageHandling || []).join(' · ')}/>
-              <ReadRow label="Comments" value={req.notes}/>
+              <EditRow label="Request Storage and Handling Conditions"
+                value={(order.storageHandling || []).join(' · ')}
+                corrected={corrections['Request Storage and Handling Conditions']} editing={editing}
+                onChange={v => correct('Request Storage and Handling Conditions', v)}/>
+              <EditRow label="Comments" value={req.notes}
+                corrected={corrections['Comments']} editing={editing}
+                onChange={v => correct('Comments', v)}/>
             </Card>
 
             {viewFields(order).length > 0 && (
@@ -2751,7 +2916,9 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 <SectionTitle title={subStreamLabel(order)} />
                 <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
                   {viewFields(order).map(f => (
-                    <ReadRow key={f.label} label={f.label} value={f.value}/>
+                    <EditRow key={f.label} label={f.label} value={f.value}
+                      corrected={corrections[f.label]} editing={editing}
+                      onChange={v => correct(f.label, v)}/>
                   ))}
                 </Card>
               </>
@@ -3098,27 +3265,46 @@ Go back to step 3, Product lines.
 };
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PRINT PALLET LABELS - the step that turns an arrival into "Received"
+// PALLET LABEL - printed BY the book-in, not the thing that causes it
 // ═════════════════════════════════════════════════════════════════════════════
-// Steritech's flow prints labels per product line and attaches them to the
-// pallet, and the "Received" status hangs off that. It sits between the arrival
-// form and the bin scan for a physical reason: a bin scan pairs a bin barcode
-// with a PALLET barcode, so the pallet has to be wearing its label first.
+// This screen used to hold a Print button and set the pallet to Received when it
+// was pressed. Ben corrected both halves on 2026-08-25.
+//
+// The direction: "as it's received, it should mark it ... I think it's the
+// opposite way. It prints a label once we've received it." Receiving is the
+// action; the print is its consequence. So the arrival form sets Received and
+// this screen opens with the label already printed.
+//
+// The unit: "We'll only ever have one pallet per one label per pallet" and "each
+// pallet has to be one label unique". ONE label per pallet, never one per product
+// line and never one per commodity - a pallet carrying oranges and apples still
+// gets one label, with the mixed commodities listed on it as a parent line.
+//
+// It still sits between the arrival form and the bin scan for a physical reason,
+// and Ben described that order too: "we book it in, it prints the labels. And
+// then we have to scan it into a position ... then we stick it on the pallets."
 const PrintLabelsScreen = ({ navigate, appData }) => {
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallet = palletOf(appData, order);
   const lines  = appData.productLines || pallet.items.map(it => ({ submitted: it.name, match: { code: it.code, name: it.name }, cartons: String(it.qty) }));
-  const [printed, setPrinted] = React.useState(false);
+  // Anything corrected at arrival prints as corrected. Falls back to the
+  // customer's value when the operator changed nothing.
+  const fixed  = appData.corrections || {};
+  const field  = (label, fallback) => (fixed[label] !== undefined ? fixed[label] : fallback);
 
   return (
-    <PageWrapper title="Print Pallet Labels" onBack={() => navigate('receiving_form')}
+    <PageWrapper title="Pallet Label" onBack={() => navigate('receiving_form')}
       bottomBar={
-        printed
-          ? <Btn label="Continue to Bin Scan →" onClick={() => { advancePallet(pallet, 'RECEIVED', ''); navigate('scan_bin', { binPhase: 'pre_treatment' }); }} color="orange" large />
-          : <Btn label="Print & Attach Labels" onClick={() => setPrinted(true)} color="blue" large />
+        /* No Print button. Booking the pallet in printed it, and the pallet is
+           already Received by the time this screen opens. The only thing left
+           for the operator is to attach it and go and scan the bin. */
+        <Btn label="Label Attached - Scan Bin →"
+          onClick={() => navigate('scan_bin', { binPhase: 'pre_treatment' })}
+          color="orange" large />
       }>
       <div style={{ padding: '20px 16px' }}>
-        <SectionTitle title="Pallet label" subtitle="One label per pallet, printed per product line" />
+        <SectionTitle title="Pallet label"
+          subtitle="One label for this pallet, listing every product line on it" />
 
         {/* The label preview carries exactly the fields Steritech listed. */}
         <div style={{
@@ -3128,9 +3314,9 @@ const PrintLabelsScreen = ({ navigate, appData }) => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
             <div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-                Lot number
+                {LOT_LABEL}
               </div>
-              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 19, fontWeight: 700, color: C.text }}>{lotOf(order)}</div>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 19, fontWeight: 700, color: C.text }}>{lotText(order)}</div>
             </div>
             <img src="assets/steritech_logo.png" alt="Steritech" style={{ width: 54, height: 'auto', opacity: 0.85 }}/>
           </div>
@@ -3155,8 +3341,8 @@ const PrintLabelsScreen = ({ navigate, appData }) => {
                 Total Pallet Quantity belongs to the scan-label view in column B,
                 not to the printed label. */}
             {[
-              { l: 'Customer Name', v: order.customer },
-              { l: 'Customer PO', v: order.po || '-' },
+              { l: 'Customer Name', v: field('Customer Name', order.customer) },
+              { l: 'Customer PO', v: field('Customer PO', order.po) || '-' },
               { l: 'Carton Quantity', v: lines.reduce((s, l) => s + (parseInt(l.cartons, 10) || 0), 0) },
             ].map(x => (
               <div key={x.l}>
@@ -3181,9 +3367,7 @@ const PrintLabelsScreen = ({ navigate, appData }) => {
           </div>
         </div>
 
-        {printed
-          ? <Alert type="teal" message="Labels printed. Attach one to each pallet, then scan the bin it goes into." />
-          : <Alert type="info" message="Printing the label is what marks this pallet Received. The bin scan comes next." />}
+        <Alert type="teal" message="Printed when you booked this pallet in. Attach it, then scan the bin it goes into." />
       </div>
     </PageWrapper>
   );
@@ -3196,11 +3380,13 @@ Object.assign(window, {
   binForState, binLabel, stamp,
   STERITECH_STATUS, CUSTOMER_STATUS, steritechStatus, customerStatus,
   BC_STEPS, SUB_STREAMS, VIEW_FIELDS, SCAN_LABEL_FIELDS,
-  viewFields, scanLabelFields, submittedValue, lotOf, subStreamLabel,
+  viewFields, scanLabelFields, submittedValue, subStreamLabel,
+  LOT_LABEL, LOT_PENDING, lotOf, lotText,
   orderCartons, palletCartons, lineDose,
-  PRIORITY_META, priorityOf, priorityMeta,
+  PRIORITY_DEFAULT, PRIORITY_LOWEST_IS_HIGHEST,
+  priorityOf, priorityLabel, byPriority,
   orderSteritechStatus, orderCustomerStatus, palletsAtOrPast, lotGate,
-  processBinSplit, processBinNote,
+  lotAllProcessedIn, processBinSplit, processBinNote,
   palletOf, palletAction,
   orderOfPallet,
   PalletRowCard, PalletGroupSection, PriorityChip, BCStepsNote,
@@ -3209,6 +3395,7 @@ Object.assign(window, {
   ScanPalletScreen,
   ScanBinScreen, SummaryScreen, ReceivingFormScreen, PrintLabelsScreen,
   BC_PRODUCTS, BC_PRODUCTS_FALLBACK, bcProductsFor, ARRIVAL_FIELDS,
+  ReadRow, ReadGrid, EditRow,
 });
 
 </script>
@@ -3232,8 +3419,17 @@ Object.assign(window, {
 // SCHEDULE" - the schedule is set in Business Central at column H, so the
 // operator is not choosing a chamber or a dose here. They are moving a pallet
 // into a bin.
+//
+// Ben confirmed this screen on 2026-08-25 - "for the scope of the scanning app,
+// that's fine where it is" - and described what the scan physically is: "you scan
+// the pallet into a physical conveyor location. That's generally all of our
+// processes. That conveyor location is detached from the process out."
+//
 // Several lots can share a priority level and the workbook does not cap it, so
-// the queue is previewed rather than printed in full.
+// the queue is previewed rather than printed in full. Ben's version of the same
+// rule: show "the top three or something ... multiple lot numbers, if they have
+// the same priority level. But it should be clear what is currently in action and
+// what's next."
 const SAME_PRIORITY_PREVIEW = 3;
 
 const ProcessInScreen = ({ navigate, appData }) => {
@@ -3244,8 +3440,10 @@ const ProcessInScreen = ({ navigate, appData }) => {
   // "May view multiple Lot Number's if granted same priority level." Other lots
   // sharing this priority are listed so the operator can see the whole queue at
   // their level, not just the one lot they came in on.
-  const samePriority = SAMPLE_ORDERS.filter(o =>
-    o.id !== order.id && priorityOf(o) === priorityOf(order) && lotGate(o, 4).done < lotGate(o, 4).total);
+  const samePriority = SAMPLE_ORDERS
+    .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
+      && lotGate(o, 4).done < lotGate(o, 4).total)
+    .sort(byPriority);
 
   return (
     <PageWrapper title="Process In" onBack={() => navigate('pallet_detail')}
@@ -3285,7 +3483,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 8, lineHeight: 1.45 }}>
             {lotGate(order, 4).complete
               ? 'Every pallet on this lot is staged. The lot status can move on.'
-              : 'The lot moves to Processing only once every pallet on it has been staged.'}
+              : 'The lot status does not close until every pallet on it has been staged.'}
           </div>
         </Card>
 
@@ -3312,8 +3510,8 @@ const ProcessInScreen = ({ navigate, appData }) => {
         {samePriority.length > 0 && (
           <>
             <div style={{ height: 18 }}/>
-            <SectionTitle title={`Also at ${priorityMeta(order).label}`}
-              subtitle="Same priority level, waiting to be processed in" />
+            <SectionTitle title={`Also at ${priorityLabel(order)}`}
+              subtitle="Same priority level, waiting to be processed in. This lot is the one in action." />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
                 const g = lotGate(o, 4);
@@ -3348,27 +3546,28 @@ const ProcessInScreen = ({ navigate, appData }) => {
   );
 };
 
-// Process out is QA work, so an operator who reaches one of these screens gets
-// told rather than shown a form. The workbook has no role row - this comes from
-// Steritech's own practice, and the status header over columns K and L is QA
-// Review, so it is at least consistent with the sheet.
-const QaOnlyNotice = ({ navigate, what }) => (
+// This used to be a QaOnlyNotice that turned OPERATORS away from process out.
+// The 2026-08-25 call reversed it. Ben: "QA review is generally a BC operation.
+// That'll be a desktop action. They pull the batch records", and it is "done on a
+// computer for QA". QA has no scanner step here at all, so it is QA that gets
+// told, not the operator.
+const NotYourStepNotice = ({ navigate, what, why }) => (
   <PageWrapper title={what} onBack={() => navigate('pallet_detail')}
     bottomBar={<Btn label="Back to Pallet" onClick={() => navigate('pallet_detail')} color="blue" />}>
     <div style={{ padding: '28px 16px' }}>
       <div style={{
-        background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: 12,
+        background: '#F1F5F9', border: `1px solid ${C.border}`, borderRadius: 12,
         padding: '16px', display: 'flex', gap: 12, alignItems: 'flex-start',
       }}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#92400E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-          <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+          <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
         </svg>
         <div>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: '#92400E' }}>
-            QA sign-in required
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: C.text }}>
+            Not a step for this role
           </div>
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
-            {what} is carried out by QA. Sign in as a QA reviewer to continue.
+            {why}
           </div>
         </div>
       </div>
@@ -3391,25 +3590,39 @@ const QaOnlyNotice = ({ navigate, what }) => (
 // and residue reading, Packing carried final packed quantity and damaged units.
 // None of those fields is in the sheet. The action is "Process out per the
 // SCHEDULE", and the only thing written is the bin.
+//
+// Two things changed after the 2026-08-25 call:
+//   ROLE   This is the OPERATOR's scan. It used to be gated to QA, which was
+//          wrong - QA never touches the scanner for it.
+//   GATE   The scan is held until the WHOLE lot is processed in. Ben: "keep it
+//          full order. We have to receive it all for it to be collectively ready
+//          ... So all or nothing for the moment."
 const ProcessOutScreen = ({ navigate, appData }) => {
-  // Process out belongs to QA, not to the operator.
-  if (appData.role !== 'qa') return <QaOnlyNotice navigate={navigate} what="Process out" />;
-
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallet = palletOf(appData, order);
   const [scanned, setScanned] = React.useState(false);
   const gate = lotGate(order, 6);
+  const inGate = lotGate(order, 5);
   const bin  = binForState('IN_STORAGE_PROCESSED', parseInt(String(pallet.id).slice(-2), 10) || 1);
+
+  // Process out is warehouse work. QA's step is the desktop review in Business
+  // Central, which happens after the whole order is out of the process.
+  if (appData.role === 'qa') return <NotYourStepNotice navigate={navigate} what="Process out"
+    why="Process out is an operator scan. QA reviews the whole order in Business Central once every pallet on it is out of the process." />;
 
   // Same rule as process in: the queue is worked by priority and several lots can
   // sit at one level, so the rest of the level is listed.
-  const samePriority = SAMPLE_ORDERS.filter(o =>
-    o.id !== order.id && priorityOf(o) === priorityOf(order) && lotGate(o, 6).done < lotGate(o, 6).total);
+  const samePriority = SAMPLE_ORDERS
+    .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
+      && lotGate(o, 6).done < lotGate(o, 6).total)
+    .sort(byPriority);
 
   return (
     <PageWrapper title="Process Out" onBack={() => navigate('pallet_detail')}
       bottomBar={
-        <Btn label={scanned ? 'Continue →' : 'Scan the warehouse bin to continue'}
+        <Btn label={!lotAllProcessedIn(order)
+              ? 'Waiting on the rest of the lot'
+              : scanned ? 'Continue →' : 'Scan the warehouse bin to continue'}
           onClick={() => navigate('pallet_detail')}
           color="green" disabled={!scanned} />
       }>
@@ -3445,16 +3658,41 @@ const ProcessOutScreen = ({ navigate, appData }) => {
           )}
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
             {gate.complete
-              ? 'Every pallet on this lot is out of the process bin. The lot status can move on.'
-              : 'The lot status will not change until every pallet on it has been picked out of the process bin.'}
+              ? 'Every pallet on this lot is out of the process bin. QA can now review the whole order in Business Central.'
+              : 'QA does not start until every pallet on this lot has been picked out of the process bin.'}
           </div>
         </Card>
 
-        {/* Column L: one field, written by a scan. */}
-        <SectionTitle title="Processed warehouse bin" subtitle="Scan the bin barcode to move the pallet" />
+        {/* Column L: one field, written by a scan - but only once the whole lot
+            is in. "All or nothing for the moment." */}
+        <SectionTitle title="Processed warehouse bin"
+          subtitle={lotAllProcessedIn(order)
+            ? 'Scan the bin barcode to move the pallet'
+            : 'Held until every pallet on this lot is processed in'} />
         <PalletChip id={pallet.id} />
         <div style={{ height: 12 }}/>
-        {scanned ? (
+        {!lotAllProcessedIn(order) ? (
+          <div style={{
+            background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: 12,
+            padding: '14px 16px',
+          }}>
+            <div style={{ display: 'flex', gap: 11, alignItems: 'flex-start' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#92400E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+                <rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              </svg>
+              <div>
+                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: '#92400E' }}>
+                  Process out is held
+                </div>
+                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
+                  A lot is processed out as a full order, so nothing goes out until every
+                  pallet on it is in. {inGate.done} of {inGate.total} pallets on this lot
+                  are processed in.
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : scanned ? (
           <>
             <Alert type="teal" message="Pallet picked out of the process bin and stored." />
             <Card style={{ padding: '14px 16px' }}>
@@ -3473,8 +3711,8 @@ const ProcessOutScreen = ({ navigate, appData }) => {
         {samePriority.length > 0 && (
           <>
             <div style={{ height: 18 }}/>
-            <SectionTitle title={`Also at ${priorityMeta(order).label}`}
-              subtitle="Same priority level, waiting to be processed out" />
+            <SectionTitle title={`Also at ${priorityLabel(order)}`}
+              subtitle="Same priority level, waiting to be processed out. This lot is the one in action." />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
                 const g = lotGate(o, 6);
@@ -3508,7 +3746,7 @@ const ProcessOutScreen = ({ navigate, appData }) => {
 
 Object.assign(window, {
   ProcessInScreen,
-  QaOnlyNotice, ProcessOutScreen,
+  NotYourStepNotice, ProcessOutScreen,
 });
 
 </script>
@@ -3518,8 +3756,12 @@ Object.assign(window, {
 // ────────────────────────────────────────────────────────────────────────
 
 // ── In Storage - Processed ────────────────────
+// One pallet being stored does not put the order into QA. Ben, 2026-08-25: "Once
+// that whole order is out of the process, QA step initiates." So the screen only
+// claims QA has started once the last pallet on the lot is out.
 const InStorageProcessedScreen = ({ navigate, appData }) => {
   const order = appData.selectedOrder || SAMPLE_ORDERS[0];
+  const gate  = lotGate(order, 6);
 
   return (
     <PageWrapper title="Stored - Processed" onBack={() => navigate('dashboard')}
@@ -3528,11 +3770,14 @@ const InStorageProcessedScreen = ({ navigate, appData }) => {
       }>
       <div style={{ padding: '20px 16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <SectionTitle title="Treated Pallet Stored" subtitle="Awaiting QA review" />
+          <SectionTitle title="Treated Pallet Stored"
+            subtitle={gate.complete ? 'Whole order out - QA review initiated' : 'Waiting on the rest of the lot'} />
           <PalletChip id={appData.palletId || DEFAULT_PALLET_ID} />
         </div>
 
-        <Alert type="info" message="Pallet is treated and stored. Awaiting QA review." />
+        <Alert type="info" message={gate.complete
+          ? 'Every pallet on this order is out of the process. QA reviews the order in Business Central.'
+          : `Pallet is treated and stored. ${gate.done} of ${gate.total} pallets on this order are out - QA starts once the last one is.`} />
 
         <Card style={{ padding: '14px 16px' }}>
           <InfoRow label="Steritech Status" valueEl={<Badge state="IN_STORAGE_PROCESSED" />} />
@@ -3548,12 +3793,22 @@ const InStorageProcessedScreen = ({ navigate, appData }) => {
 };
 
 // ── QA Status ─────────────────────────────
-// View-only - QA action happens off-scanner, not in this app.
+// View-only - QA action happens off-scanner, not in this app. Confirmed on
+// 2026-08-25: "QA review is generally a BC operation. That'll be a desktop
+// action. They pull the batch records", and it is "done on a computer for QA".
+// When it is done "the order doesn't move, but it gets a state update, which just
+// lets it be dispatched".
 //
-// QA reviews a CONSIGNMENT, not a pallet. The dose certificate and the
-// release-for-supply are issued against the lot number, so the workbook gates
-// the status: "cannot change status until all pallets have been picked out of
-// the process bin for the Lot number" (cell K3).
+// QA reviews a CONSIGNMENT, not a pallet, and it is the WHOLE ORDER at once -
+// never pallet by pallet. "Once that whole order is out of the process, QA step
+// initiates, which says this order needs to be reviewed by QA personnel." Ben's
+// own summary of the shape: "Process is like a black box. You don't know what
+// happens inside of it. It comes out, someone reviews that black box, and then
+// they ticket, yep, good to go."
+//
+// The dose certificate and the release-for-supply are issued against the lot
+// number, so the workbook gates the status: "cannot change status until all
+// pallets have been picked out of the process bin for the Lot number" (cell K3).
 //
 // This screen used to open on "QA Review Pending - QA is reviewing this pallet"
 // the moment ONE pallet was processed out. On a 20-pallet lot with 19 still in
@@ -3638,7 +3893,8 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
           padding: '9px 12px', marginBottom: 14,
         }}>
           <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, lineHeight: 1.45 }}>
-            QA review is a Business Central operation. The scanner captures no fields at
+            QA review is a desktop operation in Business Central, carried out on the whole
+            order once every pallet is out of the process. The scanner captures no fields at
             this step, so this screen is read only - it reports the outcome, it does not set it.
           </span>
         </div>
@@ -3698,7 +3954,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
         </Card>
 
         <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
-          <InfoRow label="Lot Number" value={lotOf(order)} bold />
+          <InfoRow label={LOT_LABEL} value={lotText(order)} bold={!!lotOf(order)} />
           <InfoRow label="Pallet ID" value={appData.palletId || DEFAULT_PALLET_ID} />
           <InfoRow label="Customer" value={order.customer} />
           <InfoRow label="Stream" valueEl={<StreamBadge stream={appData.stream || order.stream || 'irradiation'} />} />
@@ -3940,6 +4196,14 @@ const DispatchScreen = ({ navigate, appData }) => {
             <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
               Steritech marked the dispatch column TBC on 19 Aug 2026 and is still working
               out the truck steps. What is below is a placeholder, not an agreed design.
+            </div>
+            {/* The shape Ben sketched on 2026-08-25, kept as a note rather than
+                built: someone works from a list of orders that are QA reviewed
+                and ready, picks several, and submits them as one job. */}
+            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
+              The direction he gave: like scheduling, someone defines which orders travel
+              together and on which truck, choosing from a list of orders that are QA
+              reviewed and ready to go, then submits them as one job.
             </div>
           </div>
         </div>
