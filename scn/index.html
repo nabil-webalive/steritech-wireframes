@@ -87,11 +87,6 @@
     <option value="eto">EtO</option>
     <option value="packing">Packing</option>
   </select>
-  <label>Role (wireframe demo only)</label>
-  <select id="tweak-role">
-    <option value="operator">Warehouse Operator</option>
-    <option value="qa">QA Reviewer</option>
-  </select>
   <button class="close-btn" id="tweaks-close">Close</button>
 </div>
 
@@ -201,9 +196,10 @@ const PageWrapper = ({ title, onBack, children, bottomBar, showLogo = true, bgCo
 // ── Badge ─────────────────────────────────────
 // One badge per internal state, but every LABEL is one of Steritech's six
 // statuses from the 19 Aug workbook. Two internal states can share a label on
-// purpose: STAGED and IN_TREATMENT are both Processing as far as the client's
-// status model is concerned, and the app tells them apart internally to know
-// which screen to open.
+// purpose: IN_STORAGE_UNPROCESSED and STAGED are both Received as far as the
+// client's status model is concerned, and the app tells them apart internally to
+// know which screen to open. Processing starts at the process-in scan, so a
+// staged pallet has not reached it yet.
 //
 // QA_HOLD is the one addition. The workbook has no hold status, but a held pallet
 // has to be findable in a list, so it reads QA Review with the hold called out.
@@ -211,7 +207,7 @@ const BADGE_MAP = {
   ARRIVED:                { bg: '#F1F5F9', color: '#64748B', label: 'CREATED' },
   RECEIVED:               { bg: '#E2E8F0', color: '#475569', label: 'RECEIVED' },
   IN_STORAGE_UNPROCESSED: { bg: '#E2E8F0', color: '#475569', label: 'RECEIVED' },
-  STAGED:                 { bg: '#FEF3C7', color: '#92400E', label: 'PROCESSING' },
+  STAGED:                 { bg: '#E2E8F0', color: '#475569', label: 'RECEIVED' },
   IN_TREATMENT:           { bg: '#FEF3C7', color: '#92400E', label: 'PROCESSING' },
   PROCESS_OUT:            { bg: '#FEF3C7', color: '#92400E', label: 'QA REVIEW' },
   IN_STORAGE_PROCESSED:   { bg: '#FEF3C7', color: '#92400E', label: 'QA REVIEW' },
@@ -556,7 +552,11 @@ const STERITECH_STATUS = {
   ARRIVED:                'Created',
   RECEIVED:               'Received',
   IN_STORAGE_UNPROCESSED: 'Received',
-  STAGED:                 'Processing',
+  // Staged is still Received. The pallet has been put where the schedule wants
+  // it, but nothing has been done to it and Process In is still the next scan.
+  // Ben drew the line at the scan: "you scan one in, it moves into a processing
+  // state." CUSTOMER_STATUS has always said Received here too.
+  STAGED:                 'Received',
   IN_TREATMENT:           'Processing',
   PROCESS_OUT:            'QA Review',
   IN_STORAGE_PROCESSED:   'QA Review',
@@ -583,6 +583,30 @@ const CUSTOMER_STATUS = {
 };
 const steritechStatus = state => STERITECH_STATUS[state] || 'Created';
 const customerStatus  = state => CUSTOMER_STATUS[state]  || 'Created';
+
+// Steritech's six statuses are deliberately coarse, and two internal states can
+// fold onto one word: IN_STORAGE_UNPROCESSED and STAGED both read "Received",
+// and PROCESS_OUT and IN_STORAGE_PROCESSED both read "QA Review". That is their
+// vocabulary and it stays.
+//
+// The problem it causes on screen: two pallets of the SAME order can both say
+// "Processing" and still offer completely different actions, because one is
+// staged waiting to go in and the other is already in the chamber. Same word,
+// different button, and nothing on the screen explains it. So the status is
+// followed by a plain line saying where the pallet actually is.
+const STATE_DETAIL = {
+  ARRIVED:                'On the dock, not booked in yet',
+  RECEIVED:               'Booked in, waiting to be put away',
+  IN_STORAGE_UNPROCESSED: 'In the unprocessed warehouse',
+  STAGED:                 'Staged, waiting to be processed in',
+  IN_TREATMENT:           'In the process bin',
+  PROCESS_OUT:            'Picked out of the process bin',
+  IN_STORAGE_PROCESSED:   'In the processed warehouse',
+  QA_HOLD:                'Held by QA',
+  QA_RELEASED:            'Released by QA',
+  SHIPPED:                'Off site',
+};
+const stateDetail = state => STATE_DETAIL[state] || '';
 
 // Steps Business Central owns, not the scanner. Naming them keeps the app from
 // implying it can do work that is not its job.
@@ -656,7 +680,8 @@ const binForState = (state, n) => {
     case 'IN_STORAGE_PROCESSED':   return `Zone C - Bay ${nn}`;
     case 'QA_HOLD':                return `Zone Q - Hold ${nn}`;
     case 'QA_RELEASED':            return `Zone C - Bay ${nn}`;
-    case 'PACKED':                 return `Zone F - Dispatch ${nn}`;
+    // No PACKED case. Dispatch is TBC, so there is no agreed pallet state after
+    // QA release and nothing should pretend otherwise.
     // A dispatched pallet has left the site, so it has no bin at all.
     case 'SHIPPED':                return '';
     default:                       return `Zone A - Inbound ${nn}`;
@@ -746,8 +771,8 @@ const SAMPLE_ORDERS = [
     // pallet is processed in, so the gate is open and the nine still in treatment
     // can be scanned out one at a time.
     pallets: bulkPallets('PLT-2026-046', 'Nitrile Examination Gloves', 'PRD-1180', [
-      'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED',
-      'QA_RELEASED', 'QA_RELEASED', 'QA_RELEASED', 'PROCESS_OUT', 'PROCESS_OUT',
+      'PROCESS_OUT', 'PROCESS_OUT', 'PROCESS_OUT', 'PROCESS_OUT', 'PROCESS_OUT',
+      'PROCESS_OUT', 'PROCESS_OUT', 'PROCESS_OUT', 'PROCESS_OUT', 'PROCESS_OUT',
       'PROCESS_OUT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT',
       'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT',
     ]),
@@ -832,7 +857,9 @@ const SAMPLE_ORDERS = [
     priority: 50, date: 'Apr 25', assignee: 'Pan Xiao',
     storageHandling: ['Ambient'],
     pallets: [
-      { id: 'PLT-2026-031-01', state: 'PROCESS_OUT', weight: 48, bin: 'Zone C - Bay 05', items: [
+      // QA released this lot, so every pallet on it is released. This is the
+      // demo's QA Released case.
+      { id: 'PLT-2026-031-01', state: 'QA_RELEASED', weight: 48, bin: 'Zone C - Bay 05', items: [
         { name: 'IV Administration Sets - 20 drop', code: 'PRD-1401', qty: 250 },
       ]},
       { id: 'PLT-2026-031-02', state: 'QA_RELEASED', weight: 47, bin: 'Zone C - Bay 06', items: [
@@ -846,13 +873,15 @@ const SAMPLE_ORDERS = [
     priority: 62, date: 'Apr 24', assignee: 'Pan Xiao',
     storageHandling: ['Ambient'],
     pallets: [
-      { id: 'PLT-2026-028-01', state: 'QA_RELEASED', weight: 51, bin: 'Zone C - Bay 08', items: [
+      // Every pallet is out of the process and QA has not ruled yet. This is the
+      // demo's QA Review Pending case.
+      { id: 'PLT-2026-028-01', state: 'PROCESS_OUT', weight: 51, bin: 'Zone C - Bay 08', items: [
         { name: 'Wound Dressing Packs - Small', code: 'PRD-1501', qty: 300 },
       ]},
-      { id: 'PLT-2026-028-02', state: 'QA_RELEASED', weight: 51, bin: 'Zone C - Bay 09', items: [
+      { id: 'PLT-2026-028-02', state: 'PROCESS_OUT', weight: 51, bin: 'Zone C - Bay 09', items: [
         { name: 'Wound Dressing Packs - Medium', code: 'PRD-1502', qty: 300 },
       ]},
-      { id: 'PLT-2026-028-03', state: 'QA_RELEASED', weight: 51, bin: 'Zone C - Bay 10', items: [
+      { id: 'PLT-2026-028-03', state: 'PROCESS_OUT', weight: 51, bin: 'Zone C - Bay 10', items: [
         { name: 'Wound Dressing Packs - Large', code: 'PRD-1503', qty: 240 },
       ]},
       { id: 'PLT-2026-028-04', state: 'PROCESS_OUT', weight: 51, bin: 'Zone C - Bay 11', items: [
@@ -872,10 +901,13 @@ const SAMPLE_ORDERS = [
       'Dose Range': '25 - 50 kGy',
     },
     pallets: [
-      { id: 'PLT-2026-024-01', state: 'QA_HOLD',     weight: 32, bin: 'Zone Q - Hold 1', items: [
+      // A hold applies to the whole consignment: the dose certificate covers the
+      // lot, so one pallet cannot be held while its sibling ships. This is the
+      // demo's QA Hold case.
+      { id: 'PLT-2026-024-01', state: 'QA_HOLD', weight: 32, bin: 'Zone Q - Hold 1', items: [
         { name: 'Cardiac Stents - 3.0 mm', code: 'PRD-1601', qty: 120 },
       ]},
-      { id: 'PLT-2026-024-02', state: 'QA_RELEASED', weight: 32, bin: 'Zone C - Bay 12', items: [
+      { id: 'PLT-2026-024-02', state: 'QA_HOLD', weight: 32, bin: 'Zone Q - Hold 2', items: [
         { name: 'Cardiac Stents - 3.5 mm', code: 'PRD-1602', qty: 120 },
       ]},
     ],
@@ -946,9 +978,9 @@ const SplashScreen = ({ navigate }) => {
 const ScanEmployeeScreen = ({ navigate }) => {
   const [pin, setPin] = React.useState('');
   const [mode, setMode] = React.useState('scan'); // 'scan' | 'pin'
-  const handleScan = () => navigate('dashboard', { operator: 'Pan Xiao', role: 'operator' });
+  const handleScan = () => navigate('dashboard', { operator: 'Pan Xiao' });
   const handlePin = () => {
-    if (pin.length >= 4) navigate('dashboard', { operator: 'Pan Xiao', role: 'operator' });
+    if (pin.length >= 4) navigate('dashboard', { operator: 'Pan Xiao' });
   };
   return (
     <PageWrapper title="Sign In" showLogo={true}>
@@ -973,26 +1005,6 @@ const ScanEmployeeScreen = ({ navigate }) => {
             }}>← Back to badge scan</button>
           </>
         )}
-
-        {/* Demo-only shortcut - QA reviewer sign-in (badge scan above = operator) */}
-        <div style={{
-          marginTop: 28, padding: 12, borderRadius: 12,
-          background: '#F8FAFC', border: `1px dashed ${C.border}`,
-        }}>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 10, textAlign: 'center' }}>
-            Demo only
-          </div>
-          <button onClick={() => navigate('dashboard', { operator: 'Sarah Mitchell', role: 'qa' })} style={{
-            width: '100%', padding: '12px', borderRadius: 10, cursor: 'pointer',
-            background: '#fff', border: `1.5px solid ${C.border}`,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-          }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.green} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 12l2 2 4-4"/><path d="M12 3a9 9 0 1 0 9 9 9 9 0 0 0-9-9z"/>
-            </svg>
-            <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: C.text }}>Log in as QA Reviewer</span>
-          </button>
-        </div>
       </div>
     </PageWrapper>
   );
@@ -1056,8 +1068,8 @@ const palletsPastQA   = o => orderPallets(o).filter(p => STEP_OF(p) >= 8).length
 // Group an order's pallets by state, earliest workflow step first. Per-pallet
 // chips stop working past ~6 pallets; a grouped count scales to 20 or 200.
 // Grouped by STATUS, so the headings read in Steritech's own words. Grouping by
-// internal state would print Processing twice, once for STAGED and once for
-// IN_TREATMENT, which tells the operator nothing.
+// internal state would print Received twice, once for IN_STORAGE_UNPROCESSED and
+// once for STAGED, which tells the operator nothing.
 const groupByState = pallets => {
   const groups = new Map();
   pallets.forEach(p => {
@@ -1199,6 +1211,10 @@ const lotGate = (order, step) => {
 // pallet 2 hours before the next one. How do we run it?" It is one helper so
 // that lifting the rule later is a one-line change.
 const lotAllProcessedIn = order => lotGate(order, 5).complete;
+// The other end of the same idea, and the one QA waits on. Not a block: QA review
+// is not an action in this app, so there is nothing to refuse. It decides what the
+// pallet's button promises and what the QA screen reports.
+const lotAllProcessedOut = order => lotGate(order, 6).complete;
 // Where the rest of the lot sits. The counter alone reads as if the missing
 // pallets had gone somewhere unexplained.
 const processBinSplit = order => {
@@ -1260,30 +1276,17 @@ const KPI = ({ label, value, color }) => (
 
 // ── Dashboard Screen (Orders list, customer-style layout) ─
 const DashboardScreen = ({ navigate, appData }) => {
-  const isQA = appData.role === 'qa';
   const [sort, setSort] = React.useState('date');
-  const [filter, setFilter] = React.useState(isQA ? 'QA Review' : 'all');
+  const [filter, setFilter] = React.useState('all');
   const [query, setQuery] = React.useState('');
   // Two ways to look at the same yard. "Orders" = customer requests (ORD-…);
   // "Pallets" = the physical units the workflow actually runs on (PLT-…).
-  // QA releases per pallet, so QA lands on the pallet view by default.
-  const [view, setView] = React.useState(isQA ? 'pallets' : 'orders');
-  // Role can flip mid-session from the Tweaks panel; useState only seeds once,
-  // so re-apply the role defaults whenever it actually changes.
-  React.useEffect(() => {
-    setView(isQA ? 'pallets' : 'orders');
-    setFilter(isQA ? 'QA Review' : 'all');
-  }, [isQA]);
+  const [view, setView] = React.useState('orders');
 
   // Filters are Steritech's own statuses, plus Hold. The workbook has no hold
-  // status, but a held pallet is exactly the thing an operator or a reviewer goes
-  // looking for, so it stays as its own chip.
-  const filters = isQA ? [
-    { id: 'all',        label: 'All' },
-    { id: 'QA Review',  label: 'QA Review' },
-    { id: 'Released',   label: 'Released' },
-    { id: 'hold',       label: 'Hold' },
-  ] : [
+  // status, but a held pallet is exactly the thing an operator goes looking for,
+  // so it stays as its own chip.
+  const filters = [
     { id: 'all',         label: 'All' },
     { id: 'Created',     label: 'Created' },
     { id: 'Received',    label: 'Received' },
@@ -1301,7 +1304,6 @@ const DashboardScreen = ({ navigate, appData }) => {
   // filter chips mean exactly the same thing whichever list you are looking at.
   const stateMatches = (state) => {
     const status = steritechStatus(state);
-    if (isQA && !['QA Review', 'Released'].includes(status)) return false;
     if (filter === 'all') return true;
     if (filter === 'hold') return state === 'QA_HOLD';
     return status === filter;
@@ -1413,19 +1415,9 @@ const DashboardScreen = ({ navigate, appData }) => {
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           {/* Counts are PALLETS, not orders - the pallet is the unit of work. */}
-          {isQA ? (
-            <>
-              <KPI label="QA Review" value={countStatus('QA Review')} color={C.amber} />
-              <KPI label="Released" value={countStatus('Released')} color={C.green} />
-              <KPI label="Hold" value={ALL_PALLETS.filter(p => p.state === 'QA_HOLD').length} color={C.red || '#DC2626'} />
-            </>
-          ) : (
-            <>
-              <KPI label="Received" value={countStatus('Received')} color={C.brand} />
-              <KPI label="Processing" value={countStatus('Processing')} color={C.amber} />
-              <KPI label="QA Review" value={countStatus('QA Review')} color={C.teal || '#0F766E'} />
-            </>
-          )}
+          <KPI label="Received" value={countStatus('Received')} color={C.brand} />
+          <KPI label="Processing" value={countStatus('Processing')} color={C.amber} />
+          <KPI label="QA Review" value={countStatus('QA Review')} color={C.teal || '#0F766E'} />
         </div>
 
         {/* Orders vs Pallets - makes the two levels explicit instead of blurring
@@ -1502,7 +1494,7 @@ const DashboardScreen = ({ navigate, appData }) => {
                     <PriorityChip order={order} />
                   </div>
                 </div>
-                {!isQA && (oState === 'QA_RELEASED' || oState === 'QA_HOLD') && (
+                {(oState === 'QA_RELEASED' || oState === 'QA_HOLD') && (
                   <div style={{
                     display: 'inline-flex', alignItems: 'center', gap: 5, marginBottom: 10,
                     padding: '3px 9px', borderRadius: 999,
@@ -1730,25 +1722,29 @@ const PalletGroupSection = ({ group, onOpen }) => {
 // Next action for a single PALLET. The workflow instance lives on the pallet, so
 // this is keyed off pallet.state - never off the order. The order is still passed
 // in because ONE rule is lot-wide: process out waits for the whole lot to be in.
-const palletAction = (pallet, isQA, order) => {
+//
+// There is no role argument. The scanner belongs to the operator: QA reviews in
+// Business Central on a desktop and has no scan anywhere in this run.
+const palletAction = (pallet, order) => {
   // Column M is "QA review (BC operation)" with Scanner Data Fields = N/A, so
-  // neither role acts here. Both roles get the same read-only view.
-  const qaLabel = 'View QA Review →';
+  // nothing is captured there. The operator gets a read-only view of the outcome.
+  //
+  // Two labels, because there are two things to look at. Once the lot is out,
+  // there is a QA outcome to read. Before that QA has not started, and calling it
+  // "View QA Review" promised a review that did not exist yet. The screen behind
+  // is the same either way; only the promise changes.
+  const qaLabel = lotAllProcessedOut(order) ? 'View QA Review →' : 'Waiting on the Lot →';
   switch (pallet.state) {
-    case 'ARRIVED':                return isQA ? null : { label: 'Start Arrival →',      screen: 'receiving_form' };
-    case 'RECEIVED':               return isQA ? null : { label: 'Check In and Store →', screen: 'scan_bin' };
-    case 'IN_STORAGE_UNPROCESSED': return isQA ? null : { label: 'Process In →',         screen: 'process_in' };
-    case 'STAGED':                 return isQA ? null : { label: 'Process In →',         screen: 'process_in' };
-    // Process out is the OPERATOR's scan, not QA's. Client, 2026-08-25: "QA
-    // review is generally a BC operation. That'll be a desktop action. They pull
-    // the batch records." QA never touches the scanner for this step. The scan is
-    // held until every pallet on the lot is in - see lotAllProcessedIn.
-    case 'IN_TREATMENT':           return (isQA || !lotAllProcessedIn(order)) ? null
-                                     : { label: 'Process Out →',       screen: 'process_out' };
+    case 'ARRIVED':                return { label: 'Start Arrival →',      screen: 'receiving_form' };
+    case 'RECEIVED':               return { label: 'Check In and Store →', screen: 'scan_bin' };
+    case 'IN_STORAGE_UNPROCESSED': return { label: 'Process In →',         screen: 'process_in' };
+    case 'STAGED':                 return { label: 'Process In →',         screen: 'process_in' };
+    // Held until every pallet on the lot is in - see lotAllProcessedIn.
+    case 'IN_TREATMENT':           return lotAllProcessedIn(order)
+                                     ? { label: 'Process Out →',       screen: 'process_out' } : null;
     case 'PROCESS_OUT':            return { label: qaLabel,                      screen: 'qa_status' };
     case 'IN_STORAGE_PROCESSED':   return { label: qaLabel,                      screen: 'qa_status' };
-    // QA only does QA - once released, packing/dispatch returns to the operator.
-    case 'QA_RELEASED':            return isQA ? null : { label: 'Continue to Packing →', screen: 'packing' };
+    case 'QA_RELEASED':            return { label: 'Continue to Packing →', screen: 'packing' };
     case 'QA_HOLD':                return { label: 'View QA Hold Details →',     screen: 'qa_hold', extras: { pdrReference: 'PDR-2026-007' } };
     default:                       return null;
   }
@@ -1761,7 +1757,6 @@ const OrderDetailScreen = ({ navigate, appData }) => {
   const oState    = orderState(order);       // derived - the order has no state of its own
   const released  = palletsPastQA(order);
   const isShipped = oState === 'SHIPPED';
-  const isQA      = appData.role === 'qa';
 
   const openPallet = p => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id });
 
@@ -1772,7 +1767,7 @@ const OrderDetailScreen = ({ navigate, appData }) => {
       <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
         {/* Hand-back from QA. These are order-wide signals: "released" only
             once every pallet cleared, "hold" as soon as any one pallet is held. */}
-        {!isQA && (oState === 'QA_RELEASED' || oState === 'QA_HOLD') && (
+        {(oState === 'QA_RELEASED' || oState === 'QA_HOLD') && (
           <div style={{
             display: 'flex', alignItems: 'flex-start', gap: 11, marginBottom: 14,
             background: oState === 'QA_HOLD' ? '#FEF2F2' : '#ECFDF5',
@@ -1888,8 +1883,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   const pallet    = palletOf(appData, order);
   const step      = STEP_OF(pallet);
   const isShipped = pallet.state === 'SHIPPED';
-  const isQA      = appData.role === 'qa';
-  const action    = palletAction(pallet, isQA, order);
+  const action    = palletAction(pallet, order);
   // A pallet sitting in a warehouse can be relocated whenever, but one inside a
   // chamber or already off site cannot.
   // G3 allows a bin move in the unprocessed warehouse, K3 in the processed one.
@@ -1903,47 +1897,37 @@ const PalletDetailScreen = ({ navigate, appData }) => {
 
   // ── The rest of the lot ────────────────────────────────────────────────────
   // A lot is trucked in, staged and run as a unit, so when this pallet lands on
-  // a step this role cannot advance - process-in done, waiting on QA - the
-  // operator is still standing in front of its siblings with the scanner in
-  // hand. Sending them back through Order Detail to find the next one is a
-  // detour they take twenty times a lot.
-  // Only siblings THIS role can actually act on are listed. That is a short
-  // working queue, not the flat dump of every pallet on the order - Order
-  // Detail already shows that, grouped by state.
+  // a step the operator cannot advance - process-in done, waiting on QA - they
+  // are still standing in front of its siblings with the scanner in hand.
+  // Sending them back through Order Detail to find the next one is a detour they
+  // take twenty times a lot.
+  // Only siblings there is actually work on are listed. That is a short working
+  // queue, not the flat dump of every pallet on the order - Order Detail already
+  // shows that, grouped by state.
   // Listing them is the whole job. Jumping straight into one pallet's scan
   // screen from here was a second way to start work that skipped the pallet's
   // own view, so the rows open the pallet and its own action button takes it
   // from there - one route into a scan, not two.
   // "View QA Review" and "View QA Hold Details" are not work, they are a
   // read-only look at what Business Central decided. A pallet whose only button
-  // is one of those is finished as far as this role is concerned.
+  // is one of those is finished as far as the scanner is concerned.
   const isWork = a => !!a && !['qa_status', 'qa_hold'].includes(a.screen);
   const lotPending = orderPallets(order)
-    .filter(p => p.id !== pallet.id && isWork(palletAction(p, isQA, order)));
+    .filter(p => p.id !== pallet.id && isWork(palletAction(p, order)));
   // So the rest of the lot is the real next move, and the list belongs on screen
-  // whenever this pallet has nothing left for this role to do. Only a button
+  // whenever this pallet has nothing left to do on it. Only a button
   // that actually advances a pallet earns the screen to itself.
   const actionIsWork = isWork(action);
 
-  // Read-only footers. Each is a state where this role has nothing to scan, so
+  // Read-only footers. Each is a state where there is nothing to scan, so
   // the screen has to say WHY there is no button rather than just show none.
   const notice =
-    // IN_TREATMENT is in this list now. Process out moved to the operator, so
-    // there is no scanner step left anywhere in the warehouse run for QA.
-    (isQA && ['ARRIVED', 'RECEIVED', 'IN_STORAGE_UNPROCESSED', 'STAGED', 'IN_TREATMENT'].includes(pallet.state))
-      ? { bg: '#F1F5F9', bd: C.border, fg: C.muted, stroke: C.muted,
-          text: 'Warehouse step. Nothing for QA to do on this pallet yet.',
-          icon: <><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></> } :
     // The pallet is treated and ready, but the lot is not. Naming how many are
     // still out is the difference between a rule and a dead button.
-    (!isQA && pallet.state === 'IN_TREATMENT' && !lotAllProcessedIn(order))
+    (pallet.state === 'IN_TREATMENT' && !lotAllProcessedIn(order))
       ? { bg: '#FEF3C7', bd: '#FDE68A', fg: '#92400E', stroke: '#92400E',
           text: `Process out is held until the whole lot is processed in - ${lotGate(order, 5).done} of ${lotGate(order, 5).total} pallets are in.`,
           icon: <><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></> } :
-    (isQA && pallet.state === 'QA_RELEASED')
-      ? { bg: '#DCFCE7', bd: '#86EFAC', fg: '#15803D', stroke: C.green,
-          text: 'QA complete - this pallet is released and handed back to the operator.',
-          icon: <path d="M20 6L9 17l-5-5"/> } :
     null;
 
   return (
@@ -1984,6 +1968,13 @@ const PalletDetailScreen = ({ navigate, appData }) => {
               <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 18, fontWeight: 700, color: C.text, marginTop: 2 }}>
                 {steritechStatus(pallet.state)}
               </div>
+              {/* Without this line two pallets of one order both read
+                  "Processing" and offer different buttons for no visible reason. */}
+              {stateDetail(pallet.state) && (
+                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: isShipped ? '#15803D' : '#4338CA', marginTop: 3 }}>
+                  {stateDetail(pallet.state)}
+                </div>
+              )}
             </div>
           </div>
         </Card>
@@ -2132,11 +2123,16 @@ const PalletDetailScreen = ({ navigate, appData }) => {
         </div>
 
         {/* The same grouped list Order Detail shows, narrowed to this lot and to
-            the pallets this role can still work, and only once this screen is a
+            the pallets there is still work on, and only once this screen is a
             dead end. Same component, so the rows, the state headings and the
-            badges read identically in both places. With one sibling left the
-            footer button says it all, so the list starts at two. */}
-        {!actionIsWork && lotPending.length > 1 && (
+            badges read identically in both places.
+            This used to start at TWO siblings, on the reasoning that with one left
+            "the footer button says it all". That reasoning does not survive the
+            condition above it: this list only appears when the pallet in hand has
+            NO work, so there is no footer button pointing anywhere. A blocked
+            pallet with exactly one workable sibling showed the operator a dead end
+            and hid the one thing they could go and do. One sibling is enough. */}
+        {!actionIsWork && lotPending.length > 0 && (
           <>
             <SectionTitle title={`Rest of this lot (${lotPending.length})`}
               subtitle={`${lotOf(order)} - still waiting on you, tap to open`} />
@@ -2218,7 +2214,6 @@ const PalletDetailScreen = ({ navigate, appData }) => {
 // "step may require special considerations before allowing next scan", and maps
 // to a workflow pre-check in Exsited.
 const ScanPalletScreen = ({ navigate, appData }) => {
-  const isQA  = appData.role === 'qa';
   const order = appData.selectedOrder;
   // How much the operator has already committed to determines what a scan is
   // allowed to be. Three levels:
@@ -2229,15 +2224,12 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   const expectedOrder = expected ? null : (order || null);
   const [mismatch, setMismatch] = React.useState(null);
 
-  // Scan tab with no order context: land on a pallet this person can actually
-  // work. An operator starts at the dock, a QA reviewer starts at the machine.
-  // Landing QA on a Created pallet gave them a screen with nothing to do on it.
+  // Scan tab with no order context: land on a pallet there is work on. The run
+  // starts at the dock, so an arriving pallet is the useful default.
   const firstFor = state => orderPallets(order).find(p => p.state === state)
     || ALL_PALLETS.find(p => p.state === state);
   const target = expected
-    || (isQA
-        ? (firstFor('IN_TREATMENT') || firstFor('PROCESS_OUT') || firstFor('QA_HOLD'))
-        : firstFor('ARRIVED'))
+    || firstFor('ARRIVED')
     || orderPallets(order)[0]
     || DEFAULT_PALLET;
 
@@ -3379,6 +3371,7 @@ Object.assign(window, {
   palletsPastQA, palletsByState, stateLabel, palletProductLabel, treatmentSpec,
   binForState, binLabel, stamp,
   STERITECH_STATUS, CUSTOMER_STATUS, steritechStatus, customerStatus,
+  STATE_DETAIL, stateDetail,
   BC_STEPS, SUB_STREAMS, VIEW_FIELDS, SCAN_LABEL_FIELDS,
   viewFields, scanLabelFields, submittedValue, subStreamLabel,
   LOT_LABEL, LOT_PENDING, lotOf, lotText,
@@ -3386,7 +3379,7 @@ Object.assign(window, {
   PRIORITY_DEFAULT, PRIORITY_LOWEST_IS_HIGHEST,
   priorityOf, priorityLabel, byPriority,
   orderSteritechStatus, orderCustomerStatus, palletsAtOrPast, lotGate,
-  lotAllProcessedIn, processBinSplit, processBinNote,
+  lotAllProcessedIn, lotAllProcessedOut, processBinSplit, processBinNote,
   palletOf, palletAction,
   orderOfPallet,
   PalletRowCard, PalletGroupSection, PriorityChip, BCStepsNote,
@@ -3436,13 +3429,18 @@ const ProcessInScreen = ({ navigate, appData }) => {
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallet = palletOf(appData, order);
   const [scanned, setScanned] = React.useState(false);
+  // Step 5, not 4. The scan on this screen moves a pallet from STAGED (4) into
+  // the process bin (5), so the count is of pallets that have BEEN processed in.
+  // Counting step 4 counted the pallet in the operator's hands before they had
+  // scanned it, and a two-pallet lot opened this screen already reading 2 of 2.
+  const gate = lotGate(order, 5);
 
   // "May view multiple Lot Number's if granted same priority level." Other lots
   // sharing this priority are listed so the operator can see the whole queue at
   // their level, not just the one lot they came in on.
   const samePriority = SAMPLE_ORDERS
     .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
-      && lotGate(o, 4).done < lotGate(o, 4).total)
+      && lotGate(o, 5).done < lotGate(o, 5).total)
     .sort(byPriority);
 
   return (
@@ -3469,21 +3467,21 @@ const ProcessInScreen = ({ navigate, appData }) => {
             <PriorityChip order={order} />
           </div>
           <InfoRow label="Customer Name" value={order.customer} />
-          <InfoRow label="Qty of Pallets Picked"
-            value={`${lotGate(order, 4).done} of ${lotGate(order, 4).total}`} />
+          <InfoRow label="Qty of Pallets Processed In"
+            value={`${gate.done} of ${gate.total}`} />
           {/* One bar filled by proportion, not one segment per pallet. A lot can
               carry 20 pallets and 20 slivers reads as noise. */}
           <div style={{ height: 5, borderRadius: 3, background: C.border, overflow: 'hidden', marginTop: 10 }}>
             <div style={{
-              width: `${(lotGate(order, 4).done / Math.max(1, lotGate(order, 4).total)) * 100}%`,
+              width: `${(gate.done / Math.max(1, gate.total)) * 100}%`,
               height: '100%', borderRadius: 3, transition: 'width 220ms',
-              background: lotGate(order, 4).complete ? C.green : C.orange,
+              background: gate.complete ? C.green : C.orange,
             }}/>
           </div>
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 8, lineHeight: 1.45 }}>
-            {lotGate(order, 4).complete
-              ? 'Every pallet on this lot is staged. The lot status can move on.'
-              : 'The lot status does not close until every pallet on it has been staged.'}
+            {gate.complete
+              ? 'Every pallet on this lot is in the process bin. The lot status can move on.'
+              : 'The lot status does not close until every pallet on it has been processed in.'}
           </div>
         </Card>
 
@@ -3493,7 +3491,9 @@ const ProcessInScreen = ({ navigate, appData }) => {
         <div style={{ height: 12 }}/>
         {scanned ? (
           <>
-            <Alert type="teal" message="Pallet moved to the process bin." />
+            <Alert type="teal" message={gate.complete
+              ? 'Pallet moved to the process bin. Every pallet on this lot is now in.'
+              : `Pallet moved to the process bin. ${gate.total - gate.done} still to go on this lot.`} />
             <Card style={{ padding: '14px 16px' }}>
               <InfoRow label="Bin" value={binForState('IN_TREATMENT', 1)} bold />
             </Card>
@@ -3514,7 +3514,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
               subtitle="Same priority level, waiting to be processed in. This lot is the one in action." />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
-                const g = lotGate(o, 4);
+                const g = lotGate(o, 5);
                 return (
                   <Card key={o.id} style={{ padding: '11px 14px', cursor: 'pointer' }}
                     onClick={() => navigate('order_detail', { selectedOrder: o })}>
@@ -3524,7 +3524,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
                         <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 2 }}>{o.customer}</div>
                       </div>
                       <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted }}>
-                        {g.done} of {g.total} staged
+                        {g.done} of {g.total} in
                       </span>
                     </div>
                   </Card>
@@ -3546,35 +3546,6 @@ const ProcessInScreen = ({ navigate, appData }) => {
   );
 };
 
-// This used to be a QaOnlyNotice that turned OPERATORS away from process out.
-// The 2026-08-25 call reversed it. Ben: "QA review is generally a BC operation.
-// That'll be a desktop action. They pull the batch records", and it is "done on a
-// computer for QA". QA has no scanner step here at all, so it is QA that gets
-// told, not the operator.
-const NotYourStepNotice = ({ navigate, what, why }) => (
-  <PageWrapper title={what} onBack={() => navigate('pallet_detail')}
-    bottomBar={<Btn label="Back to Pallet" onClick={() => navigate('pallet_detail')} color="blue" />}>
-    <div style={{ padding: '28px 16px' }}>
-      <div style={{
-        background: '#F1F5F9', border: `1px solid ${C.border}`, borderRadius: 12,
-        padding: '16px', display: 'flex', gap: 12, alignItems: 'flex-start',
-      }}>
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-          <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-        </svg>
-        <div>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: C.text }}>
-            Not a step for this role
-          </div>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
-            {why}
-          </div>
-        </div>
-      </div>
-    </div>
-  </PageWrapper>
-);
-
 // ════════════════════════════════════════════════════════════════════════════
 // PROCESS OUT - columns K and L of the 19 Aug workbook
 // ════════════════════════════════════════════════════════════════════════════
@@ -3593,7 +3564,8 @@ const NotYourStepNotice = ({ navigate, what, why }) => (
 //
 // Two things changed after the 2026-08-25 call:
 //   ROLE   This is the OPERATOR's scan. It used to be gated to QA, which was
-//          wrong - QA never touches the scanner for it.
+//          wrong - QA never touches the scanner for it, and the app no longer has
+//          a QA role at all.
 //   GATE   The scan is held until the WHOLE lot is processed in. Ben: "keep it
 //          full order. We have to receive it all for it to be collectively ready
 //          ... So all or nothing for the moment."
@@ -3604,11 +3576,6 @@ const ProcessOutScreen = ({ navigate, appData }) => {
   const gate = lotGate(order, 6);
   const inGate = lotGate(order, 5);
   const bin  = binForState('IN_STORAGE_PROCESSED', parseInt(String(pallet.id).slice(-2), 10) || 1);
-
-  // Process out is warehouse work. QA's step is the desktop review in Business
-  // Central, which happens after the whole order is out of the process.
-  if (appData.role === 'qa') return <NotYourStepNotice navigate={navigate} what="Process out"
-    why="Process out is an operator scan. QA reviews the whole order in Business Central once every pallet on it is out of the process." />;
 
   // Same rule as process in: the queue is worked by priority and several lots can
   // sit at one level, so the rest of the level is listed.
@@ -3694,7 +3661,9 @@ const ProcessOutScreen = ({ navigate, appData }) => {
           </div>
         ) : scanned ? (
           <>
-            <Alert type="teal" message="Pallet picked out of the process bin and stored." />
+            <Alert type="teal" message={gate.complete
+              ? 'Pallet stored. Every pallet on this lot is out, so QA can review the order in Business Central.'
+              : `Pallet picked out of the process bin and stored. ${gate.total - gate.done} still in on this lot.`} />
             <Card style={{ padding: '14px 16px' }}>
               <InfoRow label="Bin" value={bin} bold />
             </Card>
@@ -3745,8 +3714,7 @@ const ProcessOutScreen = ({ navigate, appData }) => {
 };
 
 Object.assign(window, {
-  ProcessInScreen,
-  NotYourStepNotice, ProcessOutScreen,
+  ProcessInScreen, ProcessOutScreen,
 });
 
 </script>
@@ -3817,15 +3785,31 @@ const InStorageProcessedScreen = ({ navigate, appData }) => {
 // screen answers: is the lot even out of the process bin yet?
 const QAStatusScreen = ({ navigate, appData, setAppData }) => {
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
-  const isQA   = appData.role === 'qa';
   const gate   = lotGate(order, 6);
-  const [qaState, setQaState] = React.useState('pending');
-  // The pallets are plain mutable objects, so a demo control that only changes
-  // them changes nothing React can see - and setting qaState to the value it
-  // already holds is a no-op. The tick is what makes the mutation show up.
-  const [, tick] = React.useReducer(n => n + 1, 0);
-  // The gate wins over whatever QA state the demo is holding. A lot still half
-  // in the chamber has no QA outcome to report, full stop.
+  // Which pallets are holding the lot up. Sorted so the ones furthest behind
+  // come first - those are the ones that decide when QA can start.
+  const waitingOn = orderPallets(order)
+    .filter(p => STEP_OF(p) < 6)
+    .sort((a, b) => STEP_OF(a) - STEP_OF(b));
+  // The QA outcome is a FACT about the lot, read from its pallets. It used to be
+  // React state initialised to 'pending' for everything, so an already released
+  // lot opened on "QA Review Pending" and a held one did too - the screen simply
+  // ignored what the pallets said. Business Central owns the decision and the
+  // pallets carry it, so this reads it rather than holding its own copy.
+  const qaState = (() => {
+    const ps = orderPallets(order);
+    if (ps.some(p => p.state === 'QA_HOLD')) return 'hold';
+    if (ps.length && ps.every(p => STEP_OF(p) >= 8)) return 'released';
+    return 'pending';
+  })();
+  // The gate still wins. A lot half in the chamber has no QA outcome to report.
+  //
+  // In practice this screen is reached from a pallet at PROCESS_OUT or
+  // IN_STORAGE_PROCESSED, so the lot has not been ruled on and this lands on
+  // waiting or pending. A decided lot goes elsewhere: released sends the operator
+  // to packing, held opens the QA Hold screen with its PDR reference. The other
+  // two views stay anyway, because the outcome is read from the pallets and the
+  // screen has to be able to report a decided lot rather than fall over on one.
   const shown  = gate.complete ? qaState : 'waiting';
   const done   = shown === 'released' || shown === 'hold';
 
@@ -3861,22 +3845,14 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
   };
   const cfg = stateConfig[shown];
 
-  // QA is a lot decision, so the demo control moves the whole lot - releasing
-  // one pallet out of twenty is not a state Business Central can produce.
-  const setLot = (state, next) => {
-    orderPallets(order).forEach((p, k) => advancePallet(p, state, binForState(state, k + 1)));
-    setQaState(next);
-    tick();
-  };
-
   // No Release and no Raise Hold button. The workbook marks column M red and
   // sets its Scanner Data Fields cell to N/A, which means the scanner captures
   // nothing at this step. QA release and PDRs are raised in Business Central;
   // the app only reports what came back.
   let bottom;
-  if (shown === 'released' && !isQA) {
+  if (shown === 'released') {
     bottom = <Btn label="Continue to Dispatch →" onClick={() => navigate('packing')} color="green" large />;
-  } else if (shown === 'hold' && !isQA) {
+  } else if (shown === 'hold') {
     bottom = <Btn label="View QA Hold Details" onClick={() => navigate('qa_hold', { pdrReference: 'PDR-2026-007' })} color="darkRed" large />;
   } else {
     bottom = <Btn label="Back to Dashboard" onClick={() => navigate('dashboard')} color="blue" large />;
@@ -3979,43 +3955,32 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
           </div>
         )}
 
-        {/* Demo state switcher. This is the wireframe standing in for Business
-            Central, which is why it is labelled as a demo control. While the
-            gate is open there is nothing to switch between - the only move
-            available is finishing the lot, so that is the only control shown. */}
-        <div style={{
-          background: C.surface, borderRadius: 12, padding: '10px 12px',
-          border: `1px dashed ${C.border}`,
-        }}>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>
-            {gate.complete ? 'Demo - set QA state' : 'Demo - the lot gate'}
-          </div>
-          {gate.complete ? (
-            <div style={{ display: 'flex', gap: 6 }}>
-              {['pending', 'released', 'hold'].map(st => (
-                <button key={st} onClick={() => setLot(
-                  { pending: 'PROCESS_OUT', released: 'QA_RELEASED', hold: 'QA_HOLD' }[st], st)} style={{
-                  flex: 1, padding: '7px 8px', borderRadius: 8,
-                  border: qaState === st ? `1.5px solid ${C.brand}` : `1px solid ${C.border}`,
-                  background: qaState === st ? '#EEF2FF' : '#fff',
-                  fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 600,
-                  color: qaState === st ? C.brand : C.text, cursor: 'pointer', textTransform: 'capitalize',
-                }}>{st}</button>
+        {/* While the gate is open, QA is waiting on the warehouse and there is
+            nothing on this screen for them to press. Naming the pallets that are
+            still in beats a counter: it is the answer to "what are we waiting
+            on", and QA can chase those pallet ids. Read only - moving them is an
+            operator scan. */}
+        {!gate.complete && (
+          <>
+            <SectionTitle title={`Still in the process bin (${waitingOn.length})`}
+              subtitle="Operators scan these out one at a time. QA starts once the last one is out." />
+            <Card style={{ padding: '6px 0', marginBottom: 14 }}>
+              {waitingOn.map(p => (
+                <div key={p.id} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '9px 16px',
+                }}>
+                  <span style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 12.5, fontWeight: 700, color: C.text }}>
+                    {p.id}
+                  </span>
+                  <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted }}>
+                    {stateDetail(p.state)}
+                  </span>
+                </div>
               ))}
-            </div>
-          ) : (
-            <>
-              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginBottom: 8, lineHeight: 1.45 }}>
-                {gate.total - gate.done} of {gate.total} pallets still to be picked out. QA has no state to be in until they are.
-              </div>
-              <button onClick={() => setLot('PROCESS_OUT', 'pending')} style={{
-                width: '100%', padding: '8px', borderRadius: 8, cursor: 'pointer',
-                border: `1px solid ${C.border}`, background: '#fff',
-                fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.brand,
-              }}>Process out the rest of the lot</button>
-            </>
-          )}
-        </div>
+            </Card>
+          </>
+        )}
       </div>
     </PageWrapper>
   );
@@ -4033,7 +3998,10 @@ const PackingScreen = ({ navigate, appData }) => {
     <PageWrapper title="Packing" onBack={() => navigate('qa_status')}
       bottomBar={
         packed
-          ? <Btn label="Send to Dispatch →" onClick={() => navigate('dispatch', { palletState: 'PACKED' })} color="teal" large />
+          /* The pallet state is deliberately NOT advanced here. Dispatch is
+             TBC, so there is no agreed state after QA release, and writing one
+             would put the pallet somewhere the state model cannot describe. */
+          ? <Btn label="Send to Dispatch →" onClick={() => navigate('dispatch')} color="teal" large />
           : <Btn label="Confirm Packing Complete" onClick={() => setPacked(true)} color="orange" large />
       }>
       <div style={{ padding: '20px 16px' }}>
@@ -4447,9 +4415,7 @@ const OverrideConfirmScreen = ({ navigate, appData }) => {
 // ── Profile ───────────────────────────────────
 const ProfileScreen = ({ navigate, appData }) => {
   const operatorName = appData.operator || 'Pan Xiao';
-  const role = appData.role || 'operator';
   const initials = operatorName.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
-  const roleLabel = role === 'qa' ? 'QA Reviewer' : 'Warehouse Operator';
 
   return (
     <PageWrapper title="Profile" onBack={() => navigate('dashboard')}>
@@ -4477,11 +4443,10 @@ const ProfileScreen = ({ navigate, appData }) => {
             valueEl={
               <span style={{
                 display: 'inline-block', padding: '3px 10px', borderRadius: 999,
-                background: role === 'qa' ? '#CCFBF1' : '#EEF2FF',
-                color: role === 'qa' ? '#0F766E' : C.brand,
+                background: '#EEF2FF', color: C.brand,
                 fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700,
                 textTransform: 'uppercase', letterSpacing: 0.5,
-              }}>{roleLabel}</span>
+              }}>Warehouse Operator</span>
             }
           />
           <InfoRow label="Facility"     value="Steritech Wetherill Park" />
@@ -4489,7 +4454,7 @@ const ProfileScreen = ({ navigate, appData }) => {
           <InfoRow label="App version"  value="1.0.0" />
         </Card>
 
-        <Btn label="Sign Out" onClick={() => navigate('splash', { operator: '', role: 'operator' })} color="red" outline />
+        <Btn label="Sign Out" onClick={() => navigate('splash', { operator: '' })} color="red" outline />
       </div>
     </PageWrapper>
   );
@@ -4538,7 +4503,6 @@ function App() {
   const [screen, setScreen] = React.useState('splash');
   const [appData, setAppData] = React.useState({
     operator: '',
-    role: 'operator',
     selectedOrder: SAMPLE_ORDERS[0],
     selectedPallet: DEFAULT_PALLET,
     palletId: DEFAULT_PALLET_ID,
@@ -4566,7 +4530,6 @@ function App() {
     const panel = document.getElementById('tweaks-panel');
     const screenSel = document.getElementById('tweak-screen');
     const streamSel = document.getElementById('tweak-stream');
-    const roleSel = document.getElementById('tweak-role');
     const closeBtn = document.getElementById('tweaks-close');
 
     const handler = (e) => {
@@ -4581,9 +4544,6 @@ function App() {
     });
     streamSel.addEventListener('change', () => {
       setAppData(prev => ({ ...prev, stream: streamSel.value, selectedOrder: { ...(prev.selectedOrder || SAMPLE_ORDERS[0]), stream: streamSel.value } }));
-    });
-    roleSel.addEventListener('change', () => {
-      setAppData(prev => ({ ...prev, role: roleSel.value }));
     });
     closeBtn.addEventListener('click', () => {
       panel.style.display = 'none';
