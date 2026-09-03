@@ -1641,7 +1641,7 @@ const TIMELINE_STEPS = [
   { key: 'processing', label: 'Processing', desc: 'Processed in per the schedule' },
   { key: 'qa_review',  label: 'QA Review',  desc: 'Whole order processed out, waiting on QA in Business Central' },
   { key: 'released',   label: 'Released',   desc: 'QA review complete', owner: 'BC' },
-  { key: 'dispatched', label: 'Dispatched', desc: 'Dispatch steps not confirmed yet', owner: 'TBC' },
+  { key: 'dispatched', label: 'Dispatched', desc: 'Pallet loaded and dispatched from site' },
 ];
 // Where a pallet sits on those six. Driven by the status map, so the timeline can
 // never drift out of step with the status shown beside it.
@@ -2011,13 +2011,13 @@ const PalletDetailScreen = ({ navigate, appData }) => {
                         {tStep.label}
                       </span>
                       {/* Half of these six are not scans at all: Created happens
-                          in the portal, Released is a Business Central QA review,
-                          and Dispatch is still TBC. Saying so on the row stops the
-                          timeline from implying the app drives all six. */}
+                          in the portal and Released is a Business Central QA review.
+                          Saying so on the row stops the timeline from implying the app
+                          drives all six. */}
                       {tStep.owner && (
                         <span style={{
-                          background: tStep.owner === 'TBC' ? '#FEF3C7' : '#F1F5F9',
-                          color: tStep.owner === 'TBC' ? '#92400E' : '#475569',
+                          background: '#F1F5F9',
+                          color: '#475569',
                           borderRadius: 5, padding: '1px 6px',
                           fontFamily: 'DM Sans,sans-serif', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
                         }}>{tStep.owner}</span>
@@ -2276,13 +2276,16 @@ const ScanPalletScreen = ({ navigate, appData }) => {
     return (
       <PageWrapper title="Wrong Pallet" onBack={() => setMismatch(null)}
         bottomBar={
+          /* The safe action is the primary one. Overriding a scan guard is the
+             rarer, riskier path, so it sits below as a plain link rather than
+             as the big button the operator hits without reading. */
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <Btn label={`Continue with ${mismatch.id}`} onClick={() => proceed(mismatch)} color="orange" large />
-            <button onClick={() => setMismatch(null)} style={{
+            <Btn label="Scan again" onClick={() => setMismatch(null)} color="blue" large />
+            <button onClick={() => proceed(mismatch)} style={{
               width: '100%', background: 'none', border: 'none', color: C.muted,
               fontFamily: 'DM Sans,sans-serif', fontSize: 13, cursor: 'pointer', padding: '6px 0',
             }}>
-              Cancel and rescan
+              Continue with {mismatch.id} anyway
             </button>
           </div>
         }>
@@ -4145,35 +4148,6 @@ const DispatchScreen = ({ navigate, appData }) => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <SectionTitle title="Dispatch Confirmation" />
           <Badge state="QA_RELEASED" />
-        </div>
-
-        {/* The IRR sheet marks this column TBC and Ben's email says the truck
-            dispatch steps are still being worked on, so the screen says so
-            rather than presenting a guess as settled. */}
-        <div style={{
-          background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 12,
-          padding: '12px 14px', marginBottom: 14, display: 'flex', gap: 11, alignItems: 'flex-start',
-        }}>
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#B45309" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-          </svg>
-          <div>
-            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: '#92400E' }}>
-              Dispatch steps not confirmed yet
-            </div>
-            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
-              Steritech marked the dispatch column TBC on 19 Aug 2026 and is still working
-              out the truck steps. What is below is a placeholder, not an agreed design.
-            </div>
-            {/* The shape Ben sketched on 2026-08-25, kept as a note rather than
-                built: someone works from a list of orders that are QA reviewed
-                and ready, picks several, and submits them as one job. */}
-            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 6, lineHeight: 1.45 }}>
-              The direction he gave: like scheduling, someone defines which orders travel
-              together and on which truck, choosing from a list of orders that are QA
-              reviewed and ready to go, then submits them as one job.
-            </div>
-          </div>
         </div>
 
         <Alert type="teal" message="Pallet cleared for dispatch. Confirm below to move it to Dispatched." />
