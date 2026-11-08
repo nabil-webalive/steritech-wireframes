@@ -60,24 +60,27 @@
   <select id="tweak-screen">
     <option value="">- choose -</option>
     <option value="splash">Splash</option>
-    <option value="dashboard">Dashboard</option>
+    <option value="site_select">Site Select (after badge scan)</option>
+    <option value="dashboard">Home (process flow)</option>
+    <option value="task_queue">Task Queue (one step)</option>
+    <option value="all_orders">All Orders (full list)</option>
     <option value="order_detail">Order Detail (ORD - pallet list)</option>
     <option value="pallet_detail">Pallet Detail (PLT - workflow)</option>
     <option value="scan_pallet">Scan Pallet (after Dashboard)</option>
     <option value="scan_bin">Scan Bin Location</option>
-    <option value="summary">Summary</option>
+    <option value="summary">Pallet Summary (demo only - no route)</option>
     <option value="receiving_form">Arrival Form (product-line matching)</option>
     <option value="print_labels">Print Pallet Labels</option>
     <option value="process_in">Process In</option>
     <option value="process_out">Process Out</option>
-    <option value="in_storage_processed">In Storage - Processed</option>
+    <option value="in_storage_processed">Stored - Processed (demo only - no route)</option>
     <option value="qa_status">QA Status</option>
-    <option value="packing">Packing</option>
+    <option value="packing">Packing (not on the workbook - TBC)</option>
     <option value="qa_hold">QA Hold</option>
     <option value="dispatch">Dispatch</option>
     <option value="success">Success Screen</option>
     <option value="fail">Fail / Error Screen</option>
-    <option value="stream_error">Stream Error</option>
+    <option value="stream_error">Stream Error (demo only - no route)</option>
     <option value="supervisor_pin">Supervisor PIN</option>
     <option value="override_confirm">Override Confirm</option>
   </select>
@@ -141,13 +144,27 @@ const StatusBar = () => (
 );
 
 // ── Nav Bar ───────────────────────────────────
-const NavBar = ({ title, onBack, showLogo = true }) => (
+const NavBar = ({ title, onBack, onMenu, showLogo = true }) => (
   <div style={{
     background: C.navBg, flexShrink: 0,
     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-    padding: '10px 16px 14px', minHeight: 58,
+    padding: '10px 16px 12px', minHeight: 54,
   }}>
     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 }}>
+      {/* Home has no back arrow and no bottom bar, so this is where everything
+          that is not work now lives. */}
+      {onMenu && (
+        <button onClick={onMenu} style={{
+          background: 'none', border: 'none', cursor: 'pointer',
+          color: '#fff', padding: '4px 10px 4px 0', display: 'flex', alignItems: 'center', flexShrink: 0,
+        }} aria-label="Menu">
+          <svg width="23" height="23" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.3" strokeLinecap="round">
+            <line x1="3.5" y1="7" x2="20.5" y2="7"/>
+            <line x1="3.5" y1="12" x2="20.5" y2="12"/>
+            <line x1="3.5" y1="17" x2="20.5" y2="17"/>
+          </svg>
+        </button>
+      )}
       {onBack && (
         <button onClick={onBack} style={{
           background: 'none', border: 'none', cursor: 'pointer',
@@ -545,6 +562,7 @@ Object.assign(window, {
 //                but still blank, so the app says so instead of inventing fields.
 // ═════════════════════════════════════════════════════════════════════════════
 
+
 // Steritech runs two status vocabularies side by side. The customer never sees
 // Processing / QA Review / Released - all three read as "Received" to them, and
 // only a QA release turns it into "Processed".
@@ -707,12 +725,25 @@ const bulkPallets = (prefix, product, code, states) => states.map((state, i) => 
   };
 });
 
+const SITES = [
+  { code: 'MER', name: 'Merrifield',     state: 'VIC', address: '1725 Mickleham Rd, Merrifield VIC 3064',     services: ['Gamma', 'GMP'] },
+  { code: 'DAN', name: 'Dandenong',      state: 'VIC', address: '14 Williamson Rd, Dandenong South VIC 3175', services: ['Gamma', 'ETO'] },
+  { code: 'WPK', name: 'Wetherill Park', state: 'NSW', address: '12 Cooper St, Wetherill Park NSW 2164',      services: ['Gamma'] },
+  { code: 'NAR', name: 'Narangba',       state: 'QLD', address: '7 Potassium St, Narangba QLD 4504',          services: ['Gamma', 'GMP'] },
+];
+// Spelt out the way the portal spells them, and coloured the same, so an
+// operator who has seen one screen recognises the other.
+const SERVICE_LABEL = { Gamma: 'Gamma irradiation', ETO: 'Ethylene Oxide', GMP: 'GMP-certified packing' };
+// Short forms, for the one line a phone row can spare.
+const SERVICE_SHORT  = { Gamma: 'Gamma', ETO: 'EtO', GMP: 'GMP packing' };
+const SERVICE_COLOUR = { Gamma: '#7C3AED', ETO: '#38BDF8', GMP: '#10B981' };
+
 const SAMPLE_ORDERS = [
   {
     // Fresh Produce Domestic. Steritech's own worked example runs on this
     // stream, and its pallets sit at Received so the arrival flow is the first
     // thing the demo lands on.
-    id: 'ORD-2026-048', customer: 'NSW Fresh Produce Pty Ltd', stream: 'irradiation',
+    id: 'ORD-2026-048', site: 'WPK', customer: 'NSW Fresh Produce Pty Ltd', stream: 'irradiation',
     subStream: 'fresh_domestic', po: 'PO-2026-04412',
     priority: 38, date: 'Apr 30', assignee: 'Pan Xiao',
     storageHandling: ['Keep 5 C to 10 C', 'Do not stack above two high'],
@@ -740,7 +771,7 @@ const SAMPLE_ORDERS = [
   {
     // Fresh Produce Export. Same commodities, different paperwork - freight
     // forwarder and RFP instead of an ICA-55 date code.
-    id: 'ORD-2026-047', customer: 'Riverina Export Fruit', stream: 'irradiation',
+    id: 'ORD-2026-047', site: 'WPK', customer: 'Riverina Export Fruit', stream: 'irradiation',
     subStream: 'fresh_export', po: 'PO-2026-04407',
     priority: 50, date: 'Apr 30', assignee: 'Liam Carter',
     storageHandling: ['Keep 1 C to 4 C'],
@@ -762,7 +793,7 @@ const SAMPLE_ORDERS = [
   },
   {
     // 20 pallets on one order - the stress case for every list in this app.
-    id: 'ORD-2026-046', customer: 'Meridian Health Group', stream: 'irradiation',
+    id: 'ORD-2026-046', site: 'MER', customer: 'Meridian Health Group', stream: 'irradiation',
     subStream: 'medical', po: 'PO-2026-04446',
     priority: 50, date: 'Apr 29', assignee: 'Liam Carter',
     storageHandling: ['Ambient, keep dry'],
@@ -780,13 +811,13 @@ const SAMPLE_ORDERS = [
   {
     // Beehives. The workbook lists the row and leaves it completely empty, so
     // this order exists to prove the app says so instead of inventing fields.
-    id: 'ORD-2026-045', customer: 'Highland Apiaries', stream: 'irradiation',
+    id: 'ORD-2026-045', site: 'NAR', customer: 'Highland Apiaries', stream: 'irradiation',
     subStream: 'beehives', po: 'PO-2026-04445',
     priority: 58, date: 'Apr 29', assignee: 'Liam Carter',
     storageHandling: ['Ambient, keep dry'],
     submitted: {},
     pallets: [
-      { id: 'PLT-2026-045-01', state: 'ARRIVED', weight: 24, bin: '', items: [
+      { id: 'PLT-2026-045-01', state: 'RECEIVED', weight: 24, bin: '', items: [
         { name: 'Bee Boxes - Full Depth', code: 'PRD-2410', qty: 18 },
       ]},
       { id: 'PLT-2026-045-02', state: 'IN_STORAGE_UNPROCESSED', weight: 22, bin: 'Zone B - Bay 08', items: [
@@ -795,13 +826,13 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-041', customer: 'MedTech Australia', stream: 'irradiation',
+    id: 'ORD-2026-041', site: 'MER', customer: 'MedTech Australia', stream: 'irradiation',
     subStream: 'medical', po: 'PO-2026-04441',
     priority: 38, date: 'Apr 28', assignee: 'Pan Xiao',
     storageHandling: ['Ambient, keep dry'],
     submitted: { 'RPI': 'RPI-4482', 'Dose Range': '25 - 45 kGy' },
     pallets: [
-      { id: 'PLT-2026-041-01', state: 'ARRIVED',      weight: 48, bin: '', items: [
+      { id: 'PLT-2026-041-01', state: 'RECEIVED',     weight: 48, bin: '', items: [
         { name: 'Surgical Instruments - Class II', code: 'PRD-1042', qty: 48 },
         { name: 'Indicator Strips',                code: 'PRD-1067', qty: 120 },
       ]},
@@ -814,7 +845,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-038', customer: 'BioPharma Ltd', stream: 'eto',
+    id: 'ORD-2026-038', site: 'DAN', customer: 'BioPharma Ltd', stream: 'eto',
     subStream: null, po: 'PO-2026-04438',
     priority: 50, date: 'Apr 27', assignee: 'Pan Xiao',
     storageHandling: ['Ambient, keep dry'],
@@ -826,7 +857,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-035', customer: 'SurgiCare Corp', stream: 'irradiation',
+    id: 'ORD-2026-035', site: 'DAN', customer: 'SurgiCare Corp', stream: 'irradiation',
     subStream: 'medical', po: 'PO-2026-04435',
     priority: 58, date: 'Apr 26', assignee: 'Liam Carter',
     storageHandling: ['Ambient, keep dry'],
@@ -852,7 +883,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-031', customer: 'HealthPlus Group', stream: 'packing',
+    id: 'ORD-2026-031', site: 'MER', customer: 'HealthPlus Group', stream: 'packing',
     subStream: null, po: 'PO-2026-04431',
     priority: 50, date: 'Apr 25', assignee: 'Pan Xiao',
     storageHandling: ['Ambient'],
@@ -868,7 +899,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-028', customer: 'NovaMed Supplies', stream: 'eto',
+    id: 'ORD-2026-028', site: 'DAN', customer: 'NovaMed Supplies', stream: 'eto',
     subStream: null, po: 'PO-2026-04428',
     priority: 62, date: 'Apr 24', assignee: 'Pan Xiao',
     storageHandling: ['Ambient'],
@@ -890,7 +921,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-024', customer: 'CardioCare Health', stream: 'irradiation',
+    id: 'ORD-2026-024', site: 'WPK', customer: 'CardioCare Health', stream: 'irradiation',
     subStream: 'biosecurity', po: 'PO-2026-04424',
     priority: 45, date: 'Apr 23', assignee: 'Pan Xiao',
     storageHandling: ['Quarantine hold, do not break seal'],
@@ -913,7 +944,7 @@ const SAMPLE_ORDERS = [
     ],
   },
   {
-    id: 'ORD-2026-019', customer: 'TerraCare Medical', stream: 'packing',
+    id: 'ORD-2026-019', site: 'NAR', customer: 'TerraCare Medical', stream: 'packing',
     subStream: null, po: 'PO-2026-04419',
     priority: 71, date: 'Apr 22', assignee: 'Liam Carter',
     storageHandling: ['Ambient'],
@@ -929,7 +960,369 @@ const SAMPLE_ORDERS = [
       ]},
     ],
   },
+  // ── The backlog Ben's covering email is about ──────────────────────────────
+  // 2026-09-10: "With the scale of orders as well as timing, some orders are
+  // received and booked in but not processed for a few weeks. The current views
+  // won't work well." Every other order in this seed is days old, so nothing in
+  // the old build ever demonstrated the case he is describing. These two are
+  // weeks old and sitting still: one booked in and never put away, one put away
+  // and still waiting on the schedule. They are what the ageing chips and the
+  // red "over 14 days" counter on the home flow exist to surface.
+  {
+    id: 'ORD-2026-012', site: 'MER', customer: 'Aurora Devices', stream: 'irradiation',
+    subStream: 'medical', po: 'PO-2026-04412B',
+    priority: 50, date: 'Apr 8', assignee: 'Liam Carter',
+    storageHandling: ['Ambient, keep dry'],
+    submitted: { 'RPI': 'RPI-4405', 'Dose Range': '25 - 40 kGy' },
+    pallets: [
+      { id: 'PLT-2026-012-01', state: 'RECEIVED', weight: 39, bin: '', items: [
+        { name: 'Infusion Pump Sets', code: 'PRD-1120', qty: 180 },
+      ]},
+      { id: 'PLT-2026-012-02', state: 'RECEIVED', weight: 39, bin: '', items: [
+        { name: 'Infusion Pump Sets', code: 'PRD-1120', qty: 180 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-009', site: 'MER', customer: 'Sunraysia Citrus Co', stream: 'irradiation',
+    subStream: 'fresh_domestic', po: 'PO-2026-04409',
+    // Low number is worked first, so this lot has been sitting at the top of the
+    // schedule for a month without being processed in. That is the point.
+    priority: 22, date: 'Mar 30', assignee: 'Pan Xiao',
+    storageHandling: ['Keep 5 C to 10 C'],
+    submitted: {
+      'Number of Spaces': 4,
+      'Market & Dose': 'Domestic VIC / SA, 0.4 - 1.0 kGy',
+      'Consignee': 'Melbourne Markets, Epping VIC',
+      'Storage Temperature': '5 C to 10 C',
+      'Consignor': 'Sunraysia Citrus Co, Mildura VIC',
+      'Transport': 'Customer to arrange',
+    },
+    pallets: bulkPallets('PLT-2026-009', 'Navel Oranges', 'PRD-2260', [
+      'IN_STORAGE_UNPROCESSED', 'IN_STORAGE_UNPROCESSED',
+      'IN_STORAGE_UNPROCESSED', 'IN_STORAGE_UNPROCESSED',
+    ]),
+  },
+
+  // ── Filling every step at every site ───────────────────────────────────────
+  // The first seed left holes: Merrifield had nothing staged, Narangba had
+  // nothing past the schedule, and half the sites showed a zero on several
+  // tiles. A zero is not wrong, but a demo full of them cannot show what the
+  // screen looks like on a working day, and it hides whether the tile, the
+  // queue and the count all agree. These orders fill every step at every site,
+  // and the stream of each one matches what that site can actually run.
+  {
+    id: 'ORD-2026-052', site: 'MER', customer: 'Deakin Biomedical', stream: 'irradiation',
+    subStream: 'medical', po: 'PO-2026-04452',
+    priority: 44, date: 'Apr 27', assignee: 'Pan Xiao',
+    storageHandling: ['Ambient, keep dry'],
+    submitted: { 'RPI': 'RPI-4512', 'Dose Range': '25 - 40 kGy' },
+    pallets: bulkPallets('PLT-2026-052', 'Surgical Drapes - Fenestrated', 'PRD-1090',
+      ['STAGED', 'STAGED', 'STAGED']),
+  },
+  {
+    id: 'ORD-2026-050', site: 'MER', customer: 'Yarra Valley Berries', stream: 'irradiation',
+    subStream: 'fresh_domestic', po: 'PO-2026-04450',
+    priority: 50, date: 'Apr 30', assignee: 'Liam Carter',
+    storageHandling: ['Keep 0 C to 4 C', 'Do not stack above two high'],
+    submitted: {
+      'Number of Spaces': 2,
+      'Market & Dose': 'Domestic VIC / NSW, 0.4 - 1.0 kGy',
+      'Consignee': 'Melbourne Markets, Epping VIC',
+      'Storage Temperature': '0 C to 4 C',
+      'Consignor': 'Yarra Valley Berries, Healesville VIC',
+      'Transport': 'Steritech to book',
+    },
+    pallets: [
+      { id: 'PLT-2026-050-01', state: 'ARRIVED', weight: 34, bin: '', items: [
+        { name: 'Strawberries - 250g punnets', code: 'PRD-2302', qty: 96 },
+      ]},
+      { id: 'PLT-2026-050-02', state: 'ARRIVED', weight: 34, bin: '', items: [
+        { name: 'Raspberries - 125g punnets', code: 'PRD-2305', qty: 120 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-044', site: 'MER', customer: 'Goulburn Valley Orchards', stream: 'irradiation',
+    subStream: 'fresh_domestic', po: 'PO-2026-04444',
+    priority: 50, date: 'Apr 24', assignee: 'Pan Xiao',
+    storageHandling: ['Keep 2 C to 6 C'],
+    submitted: {
+      'Number of Spaces': 2,
+      'Market & Dose': 'Domestic VIC / NSW, 0.4 - 1.0 kGy',
+      'Consignee': 'Melbourne Markets, Epping VIC',
+      'Storage Temperature': '2 C to 6 C',
+      'Consignor': 'Goulburn Valley Orchards, Shepparton VIC',
+      'Transport': 'Steritech to book',
+    },
+    pallets: [
+      { id: 'PLT-2026-044-01', state: 'QA_RELEASED', weight: 42, bin: 'Zone C - Bay 12', items: [
+        { name: 'Pears - Packham', code: 'PRD-2271', qty: 44 },
+      ]},
+      { id: 'PLT-2026-044-02', state: 'QA_RELEASED', weight: 42, bin: 'Zone C - Bay 13', items: [
+        { name: 'Pears - Packham', code: 'PRD-2271', qty: 44 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-051', site: 'DAN', customer: 'Gippsland Market Gardens', stream: 'irradiation',
+    subStream: 'fresh_domestic', po: 'PO-2026-04451',
+    priority: 50, date: 'Apr 30', assignee: 'Liam Carter',
+    storageHandling: ['Keep 2 C to 6 C'],
+    submitted: {
+      'Number of Spaces': 3,
+      'Market & Dose': 'Domestic VIC / SA, 0.4 - 1.0 kGy',
+      'Consignee': 'Melbourne Markets, Epping VIC',
+      'Storage Temperature': '2 C to 6 C',
+      'Consignor': 'Gippsland Market Gardens, Warragul VIC',
+      'Transport': 'Steritech to book',
+    },
+    pallets: [
+      { id: 'PLT-2026-051-01', state: 'ARRIVED',  weight: 41, bin: '', items: [
+        { name: 'Sweet Corn - Bicolour', code: 'PRD-2340', qty: 72 },
+      ]},
+      { id: 'PLT-2026-051-02', state: 'ARRIVED',  weight: 41, bin: '', items: [
+        { name: 'Green Beans - Round', code: 'PRD-2344', qty: 84 },
+      ]},
+      { id: 'PLT-2026-051-03', state: 'RECEIVED', weight: 39, bin: '', items: [
+        { name: 'Sweet Corn - Bicolour', code: 'PRD-2340', qty: 72 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-043', site: 'DAN', customer: 'Bayside Surgical', stream: 'irradiation',
+    subStream: 'medical', po: 'PO-2026-04443',
+    priority: 36, date: 'Apr 26', assignee: 'Pan Xiao',
+    storageHandling: ['Ambient, keep dry'],
+    submitted: { 'RPI': 'RPI-4460', 'Dose Range': '25 - 45 kGy' },
+    pallets: [
+      { id: 'PLT-2026-043-01', state: 'IN_STORAGE_UNPROCESSED', weight: 47, bin: 'Zone B - Bay 14', items: [
+        { name: 'Suture Packs - 3/0', code: 'PRD-1105', qty: 300 },
+      ]},
+      { id: 'PLT-2026-043-02', state: 'IN_STORAGE_UNPROCESSED', weight: 47, bin: 'Zone B - Bay 15', items: [
+        { name: 'Suture Packs - 4/0', code: 'PRD-1106', qty: 300 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-036', site: 'DAN', customer: 'Portland Medical Supply', stream: 'eto',
+    subStream: null, po: 'PO-2026-04436',
+    priority: 50, date: 'Apr 23', assignee: 'Liam Carter',
+    storageHandling: ['Ambient'],
+    pallets: [
+      { id: 'PLT-2026-036-01', state: 'QA_RELEASED', weight: 61, bin: 'Zone C - Bay 16', items: [
+        { name: 'Suction Tubing Sets', code: 'PRD-1340', qty: 200 },
+      ]},
+      { id: 'PLT-2026-036-02', state: 'QA_RELEASED', weight: 61, bin: 'Zone C - Bay 17', items: [
+        { name: 'Suction Canisters - 1L', code: 'PRD-1342', qty: 160 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-049', site: 'WPK', customer: 'Hawkesbury Leafy Greens', stream: 'irradiation',
+    subStream: 'fresh_domestic', po: 'PO-2026-04449',
+    priority: 50, date: 'Apr 29', assignee: 'Pan Xiao',
+    storageHandling: ['Keep 1 C to 4 C', 'Do not stack above two high'],
+    submitted: {
+      'Number of Spaces': 2,
+      'Market & Dose': 'Domestic NSW, 0.4 - 1.0 kGy',
+      'Consignee': 'Sydney Markets, Flemington NSW',
+      'Storage Temperature': '1 C to 4 C',
+      'Consignor': 'Hawkesbury Leafy Greens, Richmond NSW',
+      'Transport': 'Customer to arrange',
+    },
+    pallets: [
+      { id: 'PLT-2026-049-01', state: 'RECEIVED', weight: 33, bin: '', items: [
+        { name: 'Baby Spinach - 1.5kg', code: 'PRD-2280', qty: 60 },
+      ]},
+      { id: 'PLT-2026-049-02', state: 'RECEIVED', weight: 33, bin: '', items: [
+        { name: 'Rocket - 1.5kg', code: 'PRD-2281', qty: 60 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-033', site: 'WPK', customer: 'Parramatta Dental Group', stream: 'irradiation',
+    subStream: 'medical', po: 'PO-2026-04433',
+    priority: 50, date: 'Apr 22', assignee: 'Liam Carter',
+    storageHandling: ['Ambient, keep dry'],
+    submitted: { 'RPI': 'RPI-4433', 'Dose Range': '25 - 40 kGy' },
+    pallets: [
+      { id: 'PLT-2026-033-01', state: 'QA_RELEASED', weight: 29, bin: 'Zone C - Bay 18', items: [
+        { name: 'Dental Burs - Assorted', code: 'PRD-1150', qty: 500 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-042', site: 'NAR', customer: 'Bundaberg Tropical Fruit', stream: 'irradiation',
+    subStream: 'fresh_domestic', po: 'PO-2026-04442',
+    priority: 40, date: 'Apr 28', assignee: 'Pan Xiao',
+    storageHandling: ['Keep 8 C to 12 C'],
+    submitted: {
+      'Number of Spaces': 4,
+      'Market & Dose': 'Domestic QLD / NSW, 0.4 - 1.0 kGy',
+      'Consignee': 'Brisbane Markets, Rocklea QLD',
+      'Storage Temperature': '8 C to 12 C',
+      'Consignor': 'Bundaberg Tropical Fruit, Bundaberg QLD',
+      'Transport': 'Steritech to book',
+    },
+    pallets: [
+      { id: 'PLT-2026-042-01', state: 'RECEIVED', weight: 45, bin: '', items: [
+        { name: 'Papaya - Red', code: 'PRD-2290', qty: 40 },
+      ]},
+      { id: 'PLT-2026-042-02', state: 'RECEIVED', weight: 45, bin: '', items: [
+        { name: 'Papaya - Red', code: 'PRD-2290', qty: 40 },
+      ]},
+      { id: 'PLT-2026-042-03', state: 'STAGED', weight: 46, bin: 'Zone B - Stage 05', items: [
+        { name: 'Custard Apples', code: 'PRD-2294', qty: 36 },
+      ]},
+      { id: 'PLT-2026-042-04', state: 'STAGED', weight: 46, bin: 'Zone B - Stage 06', items: [
+        { name: 'Custard Apples', code: 'PRD-2294', qty: 36 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-039', site: 'NAR', customer: 'Sunshine Coast Sterile', stream: 'packing',
+    subStream: null, po: 'PO-2026-04439',
+    priority: 50, date: 'Apr 26', assignee: 'Liam Carter',
+    storageHandling: ['Ambient'],
+    pallets: bulkPallets('PLT-2026-039', 'Procedure Packs - Minor', 'PRD-1560',
+      ['IN_TREATMENT', 'IN_TREATMENT', 'IN_TREATMENT']),
+  },
+  {
+    id: 'ORD-2026-034', site: 'NAR', customer: 'Moreton Bay Diagnostics', stream: 'irradiation',
+    subStream: 'medical', po: 'PO-2026-04434',
+    priority: 50, date: 'Apr 25', assignee: 'Pan Xiao',
+    storageHandling: ['Ambient, keep dry'],
+    submitted: { 'RPI': 'RPI-4434', 'Dose Range': '25 - 45 kGy' },
+    pallets: [
+      { id: 'PLT-2026-034-01', state: 'PROCESS_OUT', weight: 38, bin: 'Zone C - Bay 20', items: [
+        { name: 'Specimen Collection Kits', code: 'PRD-1170', qty: 400 },
+      ]},
+      { id: 'PLT-2026-034-02', state: 'PROCESS_OUT', weight: 38, bin: 'Zone C - Bay 21', items: [
+        { name: 'Specimen Collection Kits', code: 'PRD-1170', qty: 400 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-032', site: 'NAR', customer: 'Glass House Tropicals', stream: 'irradiation',
+    subStream: 'fresh_export', po: 'PO-2026-04432',
+    priority: 46, date: 'Apr 29', assignee: 'Pan Xiao',
+    storageHandling: ['Keep 10 C to 14 C'],
+    submitted: {
+      'Number of Spaces': 2,
+      'Market & Dose': 'Export New Zealand, 0.4 - 1.0 kGy',
+      'Request for Permit (RFP)': 'RFP-2026-0142',
+      'Storage Temperature': '10 C to 14 C',
+      'Freight Forwarder': 'Kestrel Global Logistics',
+    },
+    pallets: [
+      { id: 'PLT-2026-032-01', state: 'ARRIVED', weight: 43, bin: '', items: [
+        { name: 'Pineapples - Smooth Cayenne', code: 'PRD-2350', qty: 48 },
+      ]},
+      { id: 'PLT-2026-032-02', state: 'ARRIVED', weight: 43, bin: '', items: [
+        { name: 'Lychees - Kwai May Pink', code: 'PRD-2354', qty: 56 },
+      ]},
+    ],
+  },
+  {
+    id: 'ORD-2026-030', site: 'NAR', customer: 'Caboolture Clinical', stream: 'packing',
+    subStream: null, po: 'PO-2026-04430',
+    priority: 50, date: 'Apr 21', assignee: 'Liam Carter',
+    storageHandling: ['Ambient'],
+    pallets: [
+      { id: 'PLT-2026-030-01', state: 'QA_RELEASED', weight: 44, bin: 'Zone C - Bay 22', items: [
+        { name: 'Examination Couch Rolls', code: 'PRD-1570', qty: 180 },
+      ]},
+    ],
+  },
 ];
+
+// ── Merrifield at working scale ──────────────────────────────────────────────
+// Ben's objection was that the old home screen "won't scale well", and a seed of
+// a dozen orders cannot show whether the new one does. Merrifield carries forty
+// orders here. They are generated rather than written out one at a time, because
+// what has to be true of them is volume and an even spread across the seven
+// steps, not the detail of any single lot.
+//
+// Two rules the generator keeps:
+//   Nothing but irradiation starts at Arrival. The arrival form is only
+//   specified for irradiation on the 19 Aug sheet, so an EtO or packing lot on
+//   the dock would open a step 3 with nothing on it.
+//   The stream of every order is one the site can actually run. Merrifield is
+//   Gamma and GMP, so irradiation and packing, never EtO.
+const BULK_NAMES = [
+  'Alpine Fresh Produce',       'Barwon Medical Supply',     'Coburg Clinical',
+  'Deakin Surgical',            'Echuca Orchards',           'Footscray Diagnostics',
+  'Geelong Sterile Products',   'Hume Valley Growers',       'Ivanhoe BioTech',
+  'Jindabyne Fruit Co',         'Kyneton Health',            'Lilydale Produce',
+  'Macedon Medical',            'Nagambie Nurseries',        'Oakleigh Devices',
+  'Preston Pharma Packing',     'Queenscliff Seafoods',      'Rochester Citrus',
+  'Seymour Surgical',           'Torquay Medical Group',     'Upwey Organics',
+  'Violet Town Produce',        'Wangaratta Wound Care',     'Yarrawonga Fruit',
+  'Zetland Clinical',           'Altona Packing Co',         'Bendigo BioPack',
+  'Craigieburn Medical',        'Diamond Creek Farms',       'Essendon Sterile',
+  'Frankston Fresh',            'Gisborne Labs',
+];
+// One product family per sub-stream, so a generated lot carries something the
+// arrival form can sensibly ask about.
+const BULK_ITEMS = {
+  fresh_domestic: [{ name: 'Stone Fruit - Mixed Tray', code: 'PRD-2320' }, { name: 'Table Grapes - Thompson', code: 'PRD-2324' }],
+  fresh_export:   [{ name: 'Citrus - Navel Export', code: 'PRD-2330' },   { name: 'Mangoes - Calypso', code: 'PRD-2334' }],
+  medical:        [{ name: 'Procedure Gowns - L', code: 'PRD-1210' },      { name: 'Scalpel Blades - No 15', code: 'PRD-1214' }],
+  biosecurity:    [{ name: 'Timber Packing Cases', code: 'PRD-1620' },     { name: 'Cane Furniture - Flat Pack', code: 'PRD-1624' }],
+  packing:        [{ name: 'Sterile Barrier Pouches', code: 'PRD-1580' },  { name: 'Labelled Retail Cartons', code: 'PRD-1584' }],
+};
+const BULK_SUBMITTED = {
+  fresh_domestic: { 'Number of Spaces': 2, 'Market & Dose': 'Domestic VIC / NSW, 0.4 - 1.0 kGy', 'Consignee': 'Melbourne Markets, Epping VIC', 'Storage Temperature': '2 C to 6 C', 'Consignor': 'Grower, VIC', 'Transport': 'Steritech to book' },
+  fresh_export:   { 'Number of Spaces': 2, 'Market & Dose': 'Export USA, 0.4 - 1.0 kGy', 'Request for Permit (RFP)': 'RFP-2026-0190', 'Storage Temperature': '1 C to 4 C', 'Freight Forwarder': 'Kestrel Global Logistics' },
+  medical:        { 'RPI': 'RPI-4600', 'Dose Range': '25 - 45 kGy' },
+  biosecurity:    { 'Biosecurity Direction': 'AFF-DIR-2026-3400', 'Container Number': 'MSCU-8810440', 'RPI': 'RPI-5200', 'Dose Range': '25 - 50 kGy' },
+};
+// Seven states so the spread across the seven steps is even by construction.
+const BULK_STATES = ['ARRIVED', 'RECEIVED', 'IN_STORAGE_UNPROCESSED', 'STAGED', 'IN_TREATMENT', 'PROCESS_OUT', 'QA_RELEASED'];
+const BULK_SUBS   = ['fresh_domestic', 'medical', 'fresh_export', 'biosecurity'];
+
+const bulkMerrifield = () => BULK_NAMES.map((customer, i) => {
+  const state = BULK_STATES[i % BULK_STATES.length];
+  // Packing is allowed at Merrifield, but never on a lot that is still at
+  // Arrival, because packing has no arrival form on this sheet.
+  const isPacking = state !== 'ARRIVED' && i % 5 === 4;
+  // Only the two fresh-produce forms have arrival fields, so only those two
+  // ever sit at Arrival.
+  const sub  = isPacking ? null
+    : state === 'ARRIVED' ? (i % 2 ? 'fresh_export' : 'fresh_domestic')
+    : BULK_SUBS[i % BULK_SUBS.length];
+  const num  = 100 + i;                      // ORD-2026-100 upwards
+  const id   = `ORD-2026-${num}`;
+  const n    = 1 + (i % 4);                  // one to four pallets
+  const items = BULK_ITEMS[isPacking ? 'packing' : sub];
+  // Dates walk backwards from 30 April so the ageing chips are not all equal.
+  const day  = 30 - (i % 26);
+  return {
+    id, site: 'MER', customer,
+    stream: isPacking ? 'packing' : 'irradiation',
+    subStream: sub,
+    po: `PO-2026-${4500 + i}`,
+    priority: 30 + ((i * 7) % 45),
+    date: `${day > 0 ? 'Apr' : 'Mar'} ${day > 0 ? day : 31 + day}`,
+    assignee: i % 2 ? 'Pan Xiao' : 'Liam Carter',
+    storageHandling: isPacking ? ['Ambient'] : ['Ambient, keep dry'],
+    submitted: sub ? BULK_SUBMITTED[sub] : undefined,
+    pallets: Array.from({ length: n }, (_, k) => {
+      const nn = String(k + 1).padStart(2, '0');
+      const it = items[k % items.length];
+      return {
+        id: `PLT-2026-${num}-${nn}`,
+        state,
+        weight: 34 + ((i + k) % 22),
+        bin: binForState(state, 40 + i + k),
+        items: [{ name: it.name, code: it.code, qty: 40 + ((i + k) % 8) * 30 }],
+      };
+    }),
+  };
+});
+
+SAMPLE_ORDERS.push(...bulkMerrifield());
 
 // ── Splash Screen ─────────────────────────────
 const SplashScreen = ({ navigate }) => {
@@ -978,9 +1371,12 @@ const SplashScreen = ({ navigate }) => {
 const ScanEmployeeScreen = ({ navigate }) => {
   const [pin, setPin] = React.useState('');
   const [mode, setMode] = React.useState('scan'); // 'scan' | 'pin'
-  const handleScan = () => navigate('dashboard', { operator: 'Pan Xiao' });
+  // An employee can belong to any of the four sites, so the badge identifies the
+  // person and the next screen asks which yard they are standing in. Nothing in
+  // the app has a site until that question is answered.
+  const handleScan = () => navigate('site_select', { operator: 'Pan Xiao' });
   const handlePin = () => {
-    if (pin.length >= 4) navigate('dashboard', { operator: 'Pan Xiao' });
+    if (pin.length >= 4) navigate('site_select', { operator: 'Pan Xiao' });
   };
   return (
     <PageWrapper title="Sign In" showLogo={true}>
@@ -1105,6 +1501,19 @@ const ALL_PALLETS     = SAMPLE_ORDERS.flatMap(o => o.pallets.map(p => ({ ...p, o
 const DEFAULT_PALLET_ORDER = SAMPLE_ORDERS[0];
 const DEFAULT_PALLET  = SAMPLE_ORDERS[0].pallets[0];
 const DEFAULT_PALLET_ID = DEFAULT_PALLET.id;
+// ── Site scoping ─────────────────────────────────────────────────────────────
+// An operator signs in, picks their site, and from that point every list in the
+// app is that site's yard only. Nothing filters by site further down: the four
+// screens that LIST things do it here, and the detail screens never need to
+// because you can only reach them through one of those lists.
+const siteOf      = o => (o && o.site) || SITES[0].code;
+const siteByCode  = code => SITES.find(x => x.code === code) || null;
+const siteLabel   = code => { const x = siteByCode(code); return x ? `${x.name}, ${x.state}` : 'All sites'; };
+// A null site means no site chosen yet, which only happens on a deep link from
+// the Tweaks menu. Showing everything is the honest fallback.
+const ordersAtSite  = code => code ? SAMPLE_ORDERS.filter(o => siteOf(o) === code) : SAMPLE_ORDERS;
+const palletsAtSite = code => code ? ALL_PALLETS.filter(p => siteOf(p.order) === code) : ALL_PALLETS;
+
 // Resolve a pallet id back to the order that owns it.
 const orderOfPallet = palletId => {
   const hit = ALL_PALLETS.find(p => p.id === palletId);
@@ -1274,14 +1683,974 @@ const KPI = ({ label, value, color }) => (
   </div>
 );
 
-// ── Dashboard Screen (Orders list, customer-style layout) ─
+// ═════════════════════════════════════════════════════════════════════════════
+// WORK STEPS - what the home screen is now made of
+// ═════════════════════════════════════════════════════════════════════════════
+// Ben Heard, 2026-09-10, reviewing the rev-1 home screen:
+//   "Showing all orders at all stages is too overwhelming and won't scale well."
+//   "The problem with having every order visible on the screen is that employees
+//    will struggle to focus on a specific task. Thinking of the process in a
+//    linear flow, one person may be assigned to a specific step in the workflow
+//    for a period of, or their whole shift."
+//   "Can the screen be segmented by steps and put in order of process?"
+//
+// So the home screen stopped being a list of orders. It is the list of STEPS, in
+// process order, and each step holds only the pallets actually waiting on it. An
+// operator finds their step once and works that one queue for the shift.
+//
+// He also set the constraint this array exists to satisfy:
+//   "The app is designed to receive tasks from the server. This means that tasks
+//    can change or adapt in future updates and isn't based on a fixed processor
+//    workflow."
+// Nothing below hardcodes a step name. The home flow, every count, the queue
+// screen and the shift pin all read this array, so adding, removing or reordering
+// a step is an edit here and nowhere else. In production this array IS the task
+// payload the server hands the device at sign-in.
+//
+// `states` is what makes a step a QUEUE rather than a label: a pallet waits on
+// exactly one step, the one whose state list holds its state. The lists are
+// disjoint and together cover every state except SHIPPED - a dispatched pallet is
+// off site and waiting on nobody, so it appears in All Orders only.
+//
+// `owner` is honest about who does the work. 'scan' means the app moves the
+// pallet. 'bc' means Business Central does and this is a view - the same two
+// steps BC_STEPS already names, Scheduling and QA Review.
+const WORK_STEPS = [
+  {
+    key: 'arrival', label: 'Arrival', hint: 'Book pallets in off the dock',
+    states: ['ARRIVED'], owner: 'scan', showPriority: false, colour: '#14488F',
+    opens: 'receiving_form',
+    icon: <><path d="M10.5 2.2h3v6.9l2.3-2.3 2.1 2.1L12 15 6.1 8.9l2.1-2.1 2.3 2.3V2.2z"/><path d="M2.2 16.4h19.6v3H2.2z" opacity=".35"/><path d="M3.8 19.4h3.4v2.4H3.8zM10.3 19.4h3.4v2.4h-3.4zM16.8 19.4h3.4v2.4h-3.4z" opacity=".35"/></>,
+  },
+  {
+    key: 'putaway', label: 'Check In', hint: 'Check in and store: scan the bin in the unprocessed warehouse',
+    states: ['RECEIVED'], owner: 'scan', showPriority: false, colour: '#14488F',
+    opens: 'scan_bin',
+    icon: <><path d="M2 2.6h2.6v18.8H2zM19.4 2.6H22v18.8h-2.6z" opacity=".35"/><path d="M4.6 11.6h14.8v2.4H4.6zM4.6 19h14.8v2.4H4.6z" opacity=".35"/><path d="M7.8 5.4h8.4v6.2H7.8z"/></>,
+  },
+  {
+    // The one step that carries a priority number. Ben, 2026-09-10: "Priority
+    // only required/given at the scheduling stage" and "the priority will only be
+    // shown during the scheduling step." Scheduling itself is Business Central's,
+    // so this is the scheduled queue, read only, worked top down.
+    key: 'scheduling', label: 'Scheduling', hint: 'Waiting on the schedule',
+    states: ['IN_STORAGE_UNPROCESSED'], owner: 'bc', showPriority: true, colour: '#7C3AED',
+    // Business Central's step. Nothing to open, so the row opens the record.
+    opens: 'pallet_detail',
+    icon: <><path d="M6.8 2h2.2v3.4H6.8zM15 2h2.2v3.4H15z"/><path d="M2.6 6.4a1.6 1.6 0 0 1 1.6-1.6h15.6a1.6 1.6 0 0 1 1.6 1.6v2.2H2.6V6.4z"/><path d="M2.6 10.4h18.8v9.6a1.6 1.6 0 0 1-1.6 1.6H4.2a1.6 1.6 0 0 1-1.6-1.6v-9.6z" opacity=".35"/><path d="M5.4 12.6h3.8v3.8H5.4z"/><path d="M11.2 13.4h7.4v1.6h-7.4zM11.2 17.4h7.4v1.6h-7.4z" opacity=".6"/></>,
+  },
+  {
+    key: 'process_in', label: 'Process In', hint: 'Scan pallets into the process bin',
+    states: ['STAGED'], owner: 'scan', showPriority: false, colour: '#D97706',
+    opens: 'process_in',
+    icon: <><path d="M10.4 1.6h3.2v6.2l2.4-2.4 2.2 2.2L12 13.8 5.8 7.6 8 5.4l2.4 2.4V1.6z"/><path d="M2.6 14.6h18.8a1.6 1.6 0 0 1 1.6 1.6v4.2a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 20.4v-4.2a1.6 1.6 0 0 1 1.6-1.6z" opacity=".35"/><path d="M7.4 17.4h9.2v2.4H7.4z"/></>,
+  },
+  {
+    key: 'process_out', label: 'Process Out', hint: 'Pick pallets out of the process bin',
+    states: ['IN_TREATMENT'], owner: 'scan', showPriority: false, colour: '#D97706',
+    opens: 'process_out',
+    icon: <><path d="M13.6 13.8h-3.2V7.6L8 10 5.8 7.8 12 1.6l6.2 6.2L16 10l-2.4-2.4v6.2z"/><path d="M2.6 14.6h18.8a1.6 1.6 0 0 1 1.6 1.6v4.2a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 20.4v-4.2a1.6 1.6 0 0 1 1.6-1.6z" opacity=".35"/><path d="M7.4 17.4h9.2v2.4H7.4z"/></>,
+  },
+  {
+    key: 'qa', label: 'QA Review', hint: 'Waiting on QA in Business Central',
+    states: ['PROCESS_OUT', 'IN_STORAGE_PROCESSED', 'QA_HOLD'], owner: 'bc',
+    showPriority: false, colour: '#0F766E',
+    icon: <><path d="M4.6 4h3.2v2.4h8.4V4h3.2a2 2 0 0 1 2 2v13.6a2 2 0 0 1-2 2H4.6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" opacity=".35"/><path d="M9 1.6h6a1.2 1.2 0 0 1 1.2 1.2v2.4H7.8V2.8A1.2 1.2 0 0 1 9 1.6z"/><path d="m10.9 17.3-3.3-3.3 1.7-1.7 1.6 1.6 4.4-4.4 1.7 1.7z"/></>,
+  },
+  {
+    // Column N of the workbook, headed "Dispatch", Scanner Data Fields "TBC".
+    // It used to read "Pack & Dispatch" - the IRR sheet has no packing column at
+    // all, so that half was ours. The Packing screen still exists and is still
+    // reachable from the Tweaks menu, but it is no longer on the operator's
+    // path, because putting it there states a step Steritech has not written
+    // down.
+    key: 'dispatch', label: 'Dispatch', hint: 'Load out and dispatch',
+    states: ['QA_RELEASED'], owner: 'scan', showPriority: false, colour: '#008D02',
+    opens: 'dispatch',
+    icon: <><path d="M1.4 5.4h11.9v11.4H2.6a1.2 1.2 0 0 1-1.2-1.2V5.4z" opacity=".35"/><path d="M13.9 9h3.5a1.2 1.2 0 0 1 .96.49l2.25 3.1a1.2 1.2 0 0 1 .23.71v3.5h-6.94V9z"/><path d="M6.3 14.6a2.7 2.7 0 1 1 0 5.4 2.7 2.7 0 0 1 0-5.4zm11.1 0a2.7 2.7 0 1 1 0 5.4 2.7 2.7 0 0 1 0-5.4z"/></>,
+  },
+];
+
+// Filled, not stroked. Every place that draws a step icon goes through here, so
+// there is one answer to "what does a step look like" instead of three.
+const StepIcon = ({ step, size = 24, colour }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill={colour || step.colour} stroke="none" aria-hidden="true">
+    {step.icon}
+  </svg>
+);
+
+const stepByKey  = key => WORK_STEPS.find(s => s.key === key) || WORK_STEPS[0];
+// Site is passed in rather than read from a global, so the same helper serves
+// the home counts, the queue screen and anything later that needs a count.
+const stepQueue  = (step, site) => palletsAtSite(site).filter(p => step.states.indexOf(p.state) >= 0);
+// Which step a pallet is waiting on. Used by search results, so a hit says what
+// to do with the thing that was found instead of only naming it.
+const stepOfPallet = p => WORK_STEPS.find(s => s.states.indexOf(p.state) >= 0) || null;
+
+// Where a row in a step queue goes. Straight to that step's work, except where
+// the pallet cannot be worked yet, and except for QA Review, which is per pallet
+// because a held pallet and a pallet waiting on QA are two different screens.
+const stepOpens = (step, pallet, order) => {
+  // Process out is held until every pallet on the lot is in. Dropping the
+  // operator on a screen they cannot act on is worse than showing them why, and
+  // Pallet Detail is where the reason is written.
+  if (step.key === 'process_out' && !lotAllProcessedIn(order)) return { screen: 'pallet_detail' };
+  if (step.opens) return { screen: step.opens };
+  const a = palletAction(pallet, order);
+  return a || { screen: 'pallet_detail' };
+};
+
+// Ben, 2026-09-10: "Priority only required/given at the scheduling stage" and
+// "the priority will only be shown during the scheduling step". This is the one
+// place that decides it. The 19 Aug workbook does put a same-priority lot listing
+// on process in (column J) and process out (column L), so those screens still
+// show the queue - they just no longer print the number. Adding 'process_in' and
+// 'process_out' here puts it back.
+const PRIORITY_VISIBLE_AT = ['scheduling'];
+const priorityVisibleAt = stepKey => PRIORITY_VISIBLE_AT.indexOf(stepKey) >= 0;
+
+// ── Ageing ───────────────────────────────────────────────────────────────────
+// Ben's covering email, 2026-09-10: "With the scale of orders as well as timing,
+// some orders are received and booked in but not processed for a few weeks. The
+// current views won't work well."
+// A queue that quietly buries its oldest pallet is exactly that failure, so every
+// queue is oldest-first by default and the wait is on the row.
+const DEMO_TODAY = new Date(2026, 4, 1);      // 1 May 2026 - the demo's "now"
+const AGE_WATCH  = 7;                          // a week
+const AGE_WARN   = 14;                         // "a few weeks"
+const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const orderDate = order => {
+  const parts = String((order && order.date) || '').split(' ');
+  const mi = MONTH_NAMES.indexOf(parts[0]);
+  return mi < 0 ? DEMO_TODAY : new Date(2026, mi, Number(parts[1]) || 1);
+};
+// Days the LOT has been on site. The real figure is the timestamp the PALLET
+// entered its current state, which nothing in the app holds yet - so this is
+// derived from the order date and flagged rather than faked per pallet.
+const ageDays  = order => Math.max(0, Math.round((DEMO_TODAY - orderDate(order)) / 86400000));
+const ageTone  = d => d >= AGE_WARN ? { bg: '#FEF2F2', fg: '#B91C1C' }
+                    : d >= AGE_WATCH ? { bg: '#FFFBEB', fg: '#B45309' }
+                    : { bg: '#F1F5F9', fg: '#64748B' };
+const AgeChip = ({ order }) => {
+  const d = ageDays(order);
+  const t = ageTone(d);
+  return (
+    <span style={{
+      background: t.bg, color: t.fg, borderRadius: 6, padding: '3px 8px',
+      fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap',
+    }}>{d === 0 ? 'Today' : `${d}d waiting`}</span>
+  );
+};
+// How many pallets in a queue have been sitting past the "few weeks" mark. This
+// is the number the home screen puts in red - the backlog Ben says the old view
+// hid.
+const stepOverdue = (step, site) => stepQueue(step, site).filter(p => ageDays(p.order) >= AGE_WARN).length;
+// A held pallet is the thing an operator goes looking for, and the new home
+// screen would otherwise bury it one tap down inside QA Review.
+const stepHolds = (step, site) => stepQueue(step, site).filter(p => p.state === 'QA_HOLD').length;
+// ── Side panel ───────────────────────────────────────────────────────────────
+// What the bottom bar used to hold, minus the two entries that did not earn a
+// permanent third of the screen. Opened from the menu button in the header.
+// Everything here is a once-a-shift action: who am I, which site am I on, sign
+// out. None of it belongs next to the work.
+const SidePanel = ({ open, onClose, navigate, appData }) => {
+  if (!open) return null;
+  const site = siteByCode(appData.site);
+  const go = (screen, updates) => { onClose(); navigate(screen, updates || {}); };
+  const Item = ({ label, onClick, danger = false }) => (
+    <button onClick={onClick} style={{
+      width: '100%', textAlign: 'left', cursor: 'pointer',
+      background: 'none', border: 'none', borderBottom: `1px solid ${C.border}`,
+      padding: '14px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 600,
+      color: danger ? C.red : C.text,
+    }}>
+      {label}
+      {!danger && (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      )}
+    </button>
+  );
+  // Starts below the status bar, not over it: the phone's own bar is not the
+  // app's to cover.
+  return (
+    <div style={{ position: 'absolute', top: 30, left: 0, right: 0, bottom: 0, zIndex: 50, display: 'flex' }}>
+      {/* The drawer, then the scrim. Tapping anywhere off the panel closes it. */}
+      <div style={{
+        width: 278, background: '#fff', height: '100%',
+        display: 'flex', flexDirection: 'column',
+        boxShadow: '2px 0 18px rgba(15,23,42,0.18)',
+      }}>
+        <div style={{ background: C.navBg, padding: '18px 16px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{
+            width: 44, height: 44, borderRadius: 22, background: 'rgba(255,255,255,0.16)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'Outfit,sans-serif', fontSize: 16, fontWeight: 700, color: '#fff',
+          }}>
+            {(appData.operator || 'Operator').split(' ').map(w => w.charAt(0)).join('').slice(0, 2)}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 16, fontWeight: 700, color: '#fff' }}>
+              {appData.operator || 'Operator'}
+            </div>
+            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: 'rgba(255,255,255,0.7)', marginTop: 1 }}>
+              EMP-0042
+            </div>
+          </div>
+        </div>
+
+        <div style={{ flex: 1, overflow: 'auto' }}>
+          <Item label="My Profile" onClick={() => go('profile')} />
+          <Item label="Change Site" onClick={() => go('site_select')} />
+          {/* Which yard this operator is on, spelt out rather than abbreviated,
+              because the drawer has the width the header strip does not. */}
+          {site && (
+            <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                Current site
+              </div>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text, marginTop: 3 }}>
+                {site.name}, {site.state}
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 2 }}>
+                {site.services.map(sv => SERVICE_SHORT[sv]).join(' · ')}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ borderTop: `1px solid ${C.border}` }}>
+          <Item label="Sign Out" danger onClick={() => go('splash', { operator: '', site: null })} />
+          <div style={{ padding: '12px 16px', fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted }}>
+            SteriScan 1.0.0
+          </div>
+        </div>
+      </div>
+      <div onClick={onClose} style={{ flex: 1, background: 'rgba(15,23,42,0.45)', cursor: 'pointer' }}/>
+    </div>
+  );
+};
+
+// ── Search bar ───────────────────────────────────────────────────────────────
+// Ben, 2026-09-10: "+ pallet/order/product search is a great addition" and "Keep
+// the search bar that is handy to have." So it survives the rebuild untouched and
+// stays at the top of home, above the flow.
+const SearchBar = ({ query, setQuery, navigate, placeholder = 'Search order, pallet, lot or product…' }) => (
+  <div style={{
+    display: 'flex', alignItems: 'center', gap: 8,
+    background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12,
+    padding: '0 10px 0 12px', height: 44, marginBottom: 14,
+  }}>
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+      <circle cx="11" cy="11" r="7"/>
+      <path d="m21 21-4.3-4.3"/>
+    </svg>
+    <input
+      type="text"
+      value={query}
+      onChange={e => setQuery(e.target.value)}
+      placeholder={placeholder}
+      style={{
+        flex: 1, minWidth: 0, border: 'none', outline: 'none',
+        background: 'transparent', height: '100%',
+        fontFamily: 'DM Sans,sans-serif', fontSize: 14, color: C.text,
+      }}
+    />
+    {query && (
+      <button onClick={() => setQuery('')} style={{
+        background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+        display: 'flex', alignItems: 'center', color: C.muted, flexShrink: 0,
+      }} aria-label="Clear">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+          <path d="M18 6 6 18M6 6l12 12"/>
+        </svg>
+      </button>
+    )}
+    {/* Identify: "what is this pallet?" - opens the record, changes nothing. */}
+    <button
+      onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null })}
+      title="Scan a pallet label"
+      style={{
+        background: C.brand, border: 'none', borderRadius: 8,
+        height: 32, width: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        cursor: 'pointer', flexShrink: 0,
+      }}>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+        <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+        <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <line x1="7" y1="12" x2="17" y2="12"/>
+      </svg>
+    </button>
+  </div>
+);
+
+// One matcher for both surfaces, so a search on home and the same search in All
+// Orders can never disagree about what counts as a hit.
+const palletMatches = (p, q) =>
+  p.id.toLowerCase().indexOf(q) >= 0
+  || p.order.id.toLowerCase().indexOf(q) >= 0
+  || p.order.customer.toLowerCase().indexOf(q) >= 0
+  || (p.order.po || '').toLowerCase().indexOf(q) >= 0
+  || p.items.some(it => it.name.toLowerCase().indexOf(q) >= 0 || it.code.toLowerCase().indexOf(q) >= 0);
+const orderMatches = (o, q) =>
+  o.id.toLowerCase().indexOf(q) >= 0
+  || o.customer.toLowerCase().indexOf(q) >= 0
+  || (o.po || '').toLowerCase().indexOf(q) >= 0
+  || orderPallets(o).some(p => p.id.toLowerCase().indexOf(q) >= 0
+      || p.items.some(it => it.name.toLowerCase().indexOf(q) >= 0 || it.code.toLowerCase().indexOf(q) >= 0));
+
+// ── Site picker ──────────────────────────────────────────────────────────────
+// Sits between the badge scan and the yard. An employee can belong to any of
+// the four sites, so the badge says who they are and this says where they are.
+// Laid out the way the customer portal lays out the same four sites, down to the
+// service dots, because an operator who has seen one should recognise the other.
+//
+// It carries the pallet count per site as well, which the portal has no reason
+// to: the portal is choosing where to send goods, this is choosing which yard to
+// work, and "which of these has work waiting" is the question being asked.
+const SiteRow = ({ site, onPick, current = false }) => {
+  const pallets = palletsAtSite(site.code);
+  // Deliberately no warning line here. Overdue and held counts were shown on
+  // this row and taken back off: an operator does not choose a site, they are
+  // at one, so a red flag on a site they cannot walk to is noise. Those numbers
+  // belong on the step tiles inside the site, where they are actionable.
+  return (
+    <button onClick={() => onPick(site.code)} style={{
+      width: '100%', textAlign: 'left', cursor: 'pointer',
+      background: '#fff', borderRadius: 16,
+      border: current ? `1.5px solid ${C.brand}` : `1px solid ${C.border}`,
+      padding: '15px 16px', display: 'flex', alignItems: 'flex-start', gap: 13,
+    }}>
+      <div style={{
+        width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: '#EEF2F7',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontFamily: 'Outfit,sans-serif', fontSize: 14.5, fontWeight: 700,
+        color: C.navBg, letterSpacing: 0.3,
+      }}>{site.code}</div>
+
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {/* Name and count share the top line. Sitting the count in its own
+            column centred against a three-line block put it beside the service
+            list, which read as one crowded sentence. */}
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+          <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text, whiteSpace: 'nowrap' }}>
+            {site.name}
+          </span>
+          <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 600, color: C.muted }}>
+            {site.state}
+          </span>
+          <span style={{ flex: 1 }}/>
+          <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 22, fontWeight: 700, color: pallets.length ? C.text : C.muted, lineHeight: 1 }}>
+            {pallets.length}
+          </span>
+          <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 600, color: C.muted }}>
+            pallets
+          </span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, alignSelf: 'center' }}>
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </div>
+
+        {/* Where you already are, when this screen is reached from Change. */}
+        {current && (
+          <div style={{ marginTop: 5 }}>
+            <span style={{
+              background: '#EEF2FF', color: C.brand, borderRadius: 5, padding: '2px 7px',
+              fontFamily: 'DM Sans,sans-serif', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4,
+            }}>CURRENT SITE</span>
+          </div>
+        )}
+
+        {/* What the site can actually treat. These three keep their colours
+            because they are a legend the customer portal already uses, and they
+            are now the only colour on the row besides a warning. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '3px 12px', marginTop: 7 }}>
+          {site.services.map(sv => (
+            <span key={sv} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 6, height: 6, borderRadius: 3, background: SERVICE_COLOUR[sv] }}/>
+              <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>
+                {SERVICE_SHORT[sv]}
+              </span>
+            </span>
+          ))}
+        </div>
+
+      </div>
+    </button>
+  );
+};
+
+const SiteSelectScreen = ({ navigate, appData }) => {
+  // Reachable two ways: after the badge scan, where there is nothing to go back
+  // to, and from home when the operator moves site mid-shift, where there is.
+  const hasSite = !!appData.site;
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
+      <StatusBar />
+      <NavBar title={`Hello ${(appData.operator || 'Operator').split(' ')[0]}`}
+        onBack={hasSite ? () => navigate('dashboard') : null} showLogo={true} />
+      <div style={{ flex: 1, overflow: 'auto', padding: '20px 16px' }}>
+        <SectionTitle title="Which site are you working?"
+          subtitle={`Everything after this is that site's yard only. You have access to ${SITES.length}.`} />
+        <div style={{ height: 16 }}/>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {SITES.map(site => (
+            <SiteRow key={site.code} site={site} current={site.code === appData.site}
+              onPick={code => navigate('dashboard', { site: code })} />
+          ))}
+        </div>
+        {/* The addresses have to live somewhere, because a driver or a new
+            starter does occasionally need them, just not above the choice. */}
+        <div style={{ marginTop: 22, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 8 }}>
+            Site addresses
+          </div>
+          {SITES.map(site => (
+            <div key={site.code} style={{ display: 'flex', gap: 10, marginBottom: 4 }}>
+              <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700, color: '#94A3B8', width: 28, flexShrink: 0 }}>{site.code}</span>
+              <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, color: '#94A3B8' }}>{site.address}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── Home Screen: the process flow ────────────────────────────────────────────
+// Top to bottom: search, the shift pin if one is set, the steps in process order,
+// then All Orders as the last tile - "Maybe keep the option for all orders view
+// as a final icon on the screen."
+//
+// The flow is drawn as a rail rather than an icon grid on purpose. Ben's
+// reference shot was a 3x4 grid of icons and he called it "not a shining
+// example"; what he asked for was "laid out in a process flow to help guide the
+// user". A grid shows twelve equal choices, a rail shows an order of work, and
+// the order of work is the thing he wants the screen to teach.
 const DashboardScreen = ({ navigate, appData }) => {
+  const [menu, setMenu] = React.useState(false);
+  const site = appData.site;
+  const sitePallets = palletsAtSite(site);
+  const siteOrders  = ordersAtSite(site);
+
+  const openStep = key => navigate('task_queue', { taskStep: key });
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg, position: 'relative' }}>
+      <StatusBar />
+      <NavBar title={`Hello ${(appData.operator || 'Operator').split(' ')[0]}`}
+        onMenu={() => setMenu(true)} showLogo={true} />
+      <SidePanel open={menu} onClose={() => setMenu(false)} navigate={navigate} appData={appData} />
+      {/* Which yard these numbers are. Without it every count on this screen is
+          ambiguous, and an operator who moves site mid-shift has no way to tell
+          they are still looking at the site they left.
+          Drawn as part of the header rather than as a white bar under it: it is
+          header information, and as its own strip it belonged to neither the
+          header above nor the page below. */}
+      <div onClick={() => navigate('site_select')} style={{
+        flexShrink: 0, cursor: 'pointer', background: C.navBg,
+        padding: '0 16px 13px', display: 'flex', alignItems: 'center', gap: 8,
+      }}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(255,255,255,0.55)" stroke="none" style={{ flexShrink: 0 }}>
+          <path d="M12 2a7 7 0 0 0-7 7c0 5.1 6.1 12.2 6.36 12.5a.85.85 0 0 0 1.28 0C12.9 21.2 19 14.1 19 9a7 7 0 0 0-7-7zm0 9.6A2.6 2.6 0 1 1 14.6 9 2.6 2.6 0 0 1 12 11.6z"/>
+        </svg>
+        <span style={{ flex: 1, minWidth: 0, fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 600, color: 'rgba(255,255,255,0.86)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {siteLabel(site)}
+        </span>
+        <span style={{
+          fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700,
+          color: 'rgba(255,255,255,0.9)', flexShrink: 0,
+          background: 'rgba(255,255,255,0.12)', borderRadius: 7, padding: '4px 10px',
+        }}>Change</span>
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '16px 16px 20px' }}>
+        {/* No search bar here any more. It lives inside each step queue,
+            where it narrows the work the operator is actually doing rather
+            than the whole yard, and inside All Orders and All Pallets for a
+            yard-wide lookup. The Scan tab below still identifies any pallet
+            from anywhere. See flag F15. */}
+
+          {/* ── Section head ──────────────────────────────────────────────── */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 13 }}>
+            <div>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text, letterSpacing: '-0.2px' }}>
+                Work by step
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 2 }}>
+                In process order
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
+              <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text }}>{sitePallets.length}</span>
+              <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted }}>on site</span>
+            </div>
+          </div>
+
+          {/* ── The step grid ──────────────────────────────────────────────
+              Ben's reference was the Warehouse Insight icon menu, and this is
+              still that shape, but the icon is no longer the subject of the
+              card. The COUNT is. An icon grid tells an operator what the app
+              can do; they already know. What they are standing there asking is
+              "where is the work", so the number is the largest thing on the
+              card, the icon is a quiet identifier beside it, and the badge that
+              used to shout the count from a corner is gone.
+
+              No borders either: white cards on a cool ground with one soft
+              shadow. A hairline box around every tile is what made nine equal
+              rectangles read as a menu from a decade ago. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
+            {WORK_STEPS.map((step, i) => {
+              // Seven steps in a three-wide grid leaves the last one alone in a
+              // row with two holes beside it. The last card takes the whole row
+              // instead, laid out along it. Derived from the count, so an eighth
+              // step added to WORK_STEPS closes the row and this goes back to
+              // being an ordinary card with no code change.
+              const lastRow = WORK_STEPS.length % 3 || 3;
+              const wide = (i === WORK_STEPS.length - 1) && lastRow === 1;
+              const queue   = stepQueue(step, site);
+              const overdue = stepOverdue(step, site);
+              const holds   = stepHolds(step, site);
+              const empty   = queue.length === 0;
+              const flagged = overdue > 0 || holds > 0;
+              const flagText = holds ? `${holds} on hold` : overdue ? `${overdue} over ${AGE_WARN}d` : '';
+              const tone    = empty ? C.muted : step.colour;
+              return (
+                <button key={step.key} onClick={() => openStep(step.key)} style={{
+                  position: 'relative', cursor: 'pointer',
+                  gridColumn: wide ? 'span 3' : 'auto',
+                  height: wide ? 76 : 134,
+                  background: '#fff', border: 'none', borderRadius: 18,
+                  boxShadow: '0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)',
+                  padding: wide ? '0 16px' : '11px 12px 11px 13px',
+                  display: 'flex',
+                  flexDirection: wide ? 'row' : 'column',
+                  alignItems: wide ? 'center' : 'flex-start',
+                  gap: wide ? 14 : 0,
+                  opacity: empty ? 0.55 : 1,
+                }}>
+                  {/* Position in the process. Quiet, because it is a reference
+                      mark rather than something to act on.
+                      No "BC" marker here any more. Whether Business Central owns
+                      a step is not something an operator needs while choosing
+                      what to work on, and two small grey marks in two corners of
+                      every card was more chrome than information. The queue
+                      screen still says it, in full, where it actually changes
+                      what the operator can do. */}
+                  {!wide && (
+                    <div style={{ width: '100%', height: 12, textAlign: 'left' }}>
+                      <span style={{
+                        fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700,
+                        color: '#A8B2C1', letterSpacing: 0.2,
+                      }}>{i + 1}</span>
+                    </div>
+                  )}
+
+                  {/* The glyph itself, no tinted chip behind it. The chip was
+                      squeezing the icon down to a coloured smudge; at 23px with
+                      air around it the drawing is legible again. */}
+                  <div style={{ marginTop: wide ? 0 : 8, flexShrink: 0 }}>
+                    <StepIcon step={step} size={23} colour={tone} />
+                  </div>
+
+                  {wide ? (
+                    <>
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: 9, flex: 1, minWidth: 0 }}>
+                        <span style={{
+                          fontFamily: 'Outfit,sans-serif', fontSize: 25, fontWeight: 700,
+                          color: empty ? C.muted : C.text, lineHeight: 1, letterSpacing: '-0.5px',
+                        }}>{queue.length}</span>
+                        <span style={{
+                          fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 600,
+                          color: empty ? C.muted : '#475569',
+                        }}>{step.label}</span>
+                        {flagText && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <span style={{ width: 5, height: 5, borderRadius: 3, background: C.red }}/>
+                            <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700, color: C.red }}>{flagText}</span>
+                          </span>
+                        )}
+                      </div>
+                      <span style={{
+                        fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700,
+                        color: '#A8B2C1', letterSpacing: 0.2, flexShrink: 0,
+                      }}>{i + 1}</span>
+                    </>
+                  ) : (
+                    <>
+                      {/* The number is the card. */}
+                      <div style={{
+                        fontFamily: 'Outfit,sans-serif', fontSize: 25, fontWeight: 700,
+                        color: empty ? C.muted : C.text, lineHeight: 1, marginTop: 10,
+                        letterSpacing: '-0.5px',
+                      }}>{queue.length}</div>
+                      <div style={{
+                        fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 600,
+                        color: empty ? C.muted : '#475569', marginTop: 3, textAlign: 'left', lineHeight: 1.2,
+                      }}>{step.label}</div>
+                      {/* Pinned to the bottom so a card with a warning is the
+                          same height as one without. */}
+                      {flagText && (
+                        <div style={{
+                          position: 'absolute', left: 13, bottom: 10,
+                          display: 'flex', alignItems: 'center', gap: 4,
+                        }}>
+                          <span style={{ width: 5, height: 5, borderRadius: 3, background: C.red, flexShrink: 0 }}/>
+                          <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10, fontWeight: 700, color: C.red }}>
+                            {flagText}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* ── Browse ─────────────────────────────────────────────────────
+              Split off from the steps rather than sitting as two more cells in
+              the same grid. They are not steps, they do not carry a position in
+              the process, and dashing their borders to say so was a hack. A
+              section of their own says it properly. */}
+          <div style={{
+            fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700,
+            color: '#A8B2C1', textTransform: 'uppercase', letterSpacing: 0.9,
+            margin: '22px 0 9px',
+          }}>
+            Browse
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {[
+              { key: 'orders',  label: 'All Orders',  view: 'orders',  count: siteOrders.length,
+                icon: <><path d="M2.4 4h4.2v4.2H2.4zM2.4 9.9h4.2v4.2H2.4zM2.4 15.8h4.2v4.2H2.4z"/><path d="M8.4 5.1h13.2v2H8.4zM8.4 11h13.2v2H8.4zM8.4 16.9h13.2v2H8.4z" opacity=".55"/></> },
+              { key: 'pallets', label: 'All Pallets', view: 'pallets', count: sitePallets.length,
+                icon: <><path d="M2.8 2.8h8.1v8.1H2.8zM13.1 2.8h8.1v8.1h-8.1zM2.8 13.1h8.1v8.1H2.8zM13.1 13.1h8.1v8.1h-8.1z"/></> },
+            ].map(b => (
+              <button key={b.key}
+                onClick={() => navigate('all_orders', { allOrdersQuery: '', allOrdersView: b.view })}
+                style={{
+                  cursor: 'pointer', background: '#fff', border: 'none', borderRadius: 16,
+                  boxShadow: '0 1px 2px rgba(16,24,40,0.06), 0 1px 3px rgba(16,24,40,0.04)',
+                  padding: '12px 13px', display: 'flex', alignItems: 'center', gap: 11,
+                }}>
+                <div style={{
+                  width: 32, height: 32, borderRadius: 10, flexShrink: 0, background: '#F1F5F9',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="#64748B" stroke="none" aria-hidden="true">
+                    {b.icon}
+                  </svg>
+                </div>
+                <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+                  <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text, lineHeight: 1 }}>
+                    {b.count}
+                  </div>
+                  <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, fontWeight: 600, color: '#475569', marginTop: 3 }}>
+                    {b.label}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Scan. Column B of the workbook, "Scan Label / VIEW (scan at any
+              point)": it is not a step and it advances nothing, it answers
+              "what is this pallet and where is it up to". The one dark surface
+              on the screen, because it is the one thing an operator reaches for
+              from anywhere. */}
+          <button onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null })}
+            style={{
+              width: '100%', marginTop: 12, cursor: 'pointer',
+              background: C.navBg, border: 'none', borderRadius: 16,
+              padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 13,
+            }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: 12, flexShrink: 0, background: 'rgba(255,255,255,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+                <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+                <line x1="7" y1="12" x2="17" y2="12"/>
+              </svg>
+            </div>
+            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: '#fff' }}>
+                Scan a pallet
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: 'rgba(255,255,255,0.66)', marginTop: 2 }}>
+                Any pallet, any step
+              </div>
+            </div>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+      </div>
+    </div>
+  );
+};
+
+// One lot inside a step queue.
+//
+// A queue is a list of LOTS, not a list of pallets. A lot is trucked in, staged
+// and run as a unit, one of the orders in this seed carries 20 pallets, and a
+// real day can hold dozens of lots at one step. Printing every pallet as a card
+// would rebuild the exact wall Ben objected to, one level down: 30 lots at 20
+// pallets is 600 cards.
+//
+// It also does not match the job. At the dock the operator is not browsing a
+// list to choose a pallet - the pallet is already in front of them and they
+// scan it. What the list has to answer is "which lots am I working and how much
+// is left on each", and the pallets are the detail behind that.
+//
+// So a lot is one row, and its pallets unfold underneath on tap. A small lot
+// opens itself, because collapsing three rows hides nothing and costs a tap.
+const LOT_AUTO_OPEN = 3;   // pallets at this step, at or below which the lot opens itself
+const LOT_PREVIEW   = 6;   // pallets drawn before "show all"
+const QueueLotGroup = ({ group, step, showPriority, forceOpen = false, onOpenOrder, onOpenPallet }) => {
+  const here  = group.pallets.length;
+  const total = orderPallets(group.order).length;
+  // Open while a search is running: the rows left in the list ARE the hits, and
+  // hiding them behind a collapsed lot would make the search look broken.
+  const [open, setOpen] = React.useState(here <= LOT_AUTO_OPEN);
+  const shownOpen = open || forceOpen;
+  const [showAll, setShowAll] = React.useState(false);
+  const shown = showAll ? group.pallets : group.pallets.slice(0, LOT_PREVIEW);
+  // How much of the lot is already past this step. At process in and process out
+  // the whole lot has to clear before the status moves, so "6 of 20 done" is the
+  // number the operator is actually working towards.
+  const done  = total - here;
+
+  return (
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      {/* ── The lot row. This is the unit of the queue. ─────────────────── */}
+      <div onClick={() => setOpen(!open)} style={{
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '12px 14px', cursor: 'pointer',
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text }}>
+              {lotText(group.order)}
+            </span>
+            {/* Which service this lot is for. The three streams take different
+                forms at arrival and run in different chambers, so an operator
+                working a mixed queue needs to know before they open it. */}
+            <StreamBadge stream={group.order.stream} />
+            {/* The only place in the app a priority number appears. */}
+            {showPriority && <PriorityChip order={group.order} />}
+          </div>
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {group.order.customer}
+            {/* Irradiation is not one form. Which of the five it is decides what
+                the arrival screen asks for, so it is named next to the customer. */}
+            {subStreamLabel(group.order) ? ` · ${subStreamLabel(group.order)}` : ''}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
+            <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 700, color: C.text }}>
+              {here} pallet{here !== 1 ? 's' : ''} here
+            </span>
+            {/* Only worth saying when part of the lot has already moved on. */}
+            {done > 0 && (
+              <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>
+                {done} of {total} done
+              </span>
+            )}
+          </div>
+          {/* A lot the size of a truckload needs its progress visible without
+              counting cards. One bar, filled by proportion. */}
+          {total > 1 && (
+            <div style={{ height: 4, borderRadius: 2, background: C.border, overflow: 'hidden', marginTop: 7 }}>
+              <div style={{ width: `${(done / total) * 100}%`, height: '100%', borderRadius: 2, background: step ? step.colour : C.brand }}/>
+            </div>
+          )}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
+          <AgeChip order={group.order} />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform: shownOpen ? 'rotate(90deg)' : 'none', transition: 'transform 160ms' }}>
+            <polyline points="9 18 15 12 9 6"/>
+          </svg>
+        </div>
+      </div>
+
+      {/* ── The pallets, only once asked for. ───────────────────────────── */}
+      {shownOpen && (
+        <div style={{ borderTop: `1px solid ${C.border}`, background: '#F8FAFC', padding: '10px 12px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {shown.map(p => <PalletRowCard key={p.id} pallet={p} onOpen={onOpenPallet} />)}
+          </div>
+          {here > LOT_PREVIEW && (
+            <button onClick={() => setShowAll(!showAll)} style={{
+              width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 10,
+              border: `1px solid ${C.border}`, background: '#fff', cursor: 'pointer',
+              fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.brand,
+            }}>
+              {showAll ? 'Show fewer' : `Show all ${here} pallets →`}
+            </button>
+          )}
+          <button onClick={() => onOpenOrder(group.order)} style={{
+            width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 10,
+            border: 'none', background: 'transparent', cursor: 'pointer',
+            fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.muted,
+          }}>
+            Open the whole lot →
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+};
+
+// ── Task Queue: one step, only the pallets waiting on it ─────────────────────
+// This is the screen the home rail exists to open. It holds nothing but the work
+// of one step, which is the whole point of the 10 Sep note: "employees will
+// struggle to focus on a specific task".
+//
+// Rows are grouped by LOT, not listed flat. A lot is trucked in, staged and run
+// as a unit, and one lot on this demo carries 20 pallets - a flat list of 19
+// pallets in Process Out is the same wall of cards Ben objected to, one level
+// down.
+const TaskQueueScreen = ({ navigate, appData }) => {
+  const step  = stepByKey(appData.taskStep);
+  const isBC  = step.owner === 'bc';
+  const showPriority = step.showPriority && priorityVisibleAt(step.key);
+  // Scheduling is worked down the schedule, everything else oldest first so a
+  // pallet booked in weeks ago cannot sink under this morning's arrivals.
+  const [sort, setSort] = React.useState(showPriority ? 'priority' : 'oldest');
+  const [query, setQuery] = React.useState('');
+  const q = query.trim().toLowerCase();
+
+  const all   = stepQueue(step, appData.site);
+  const queue = q ? all.filter(p => palletMatches(p, q)) : all;
+  // Group to lots, then order the GROUPS - sorting pallets and grouping after
+  // would scatter one lot down the list.
+  const groups = [];
+  queue.forEach(p => {
+    let g = groups.find(x => x.order.id === p.order.id);
+    if (!g) { g = { order: p.order, pallets: [] }; groups.push(g); }
+    g.pallets.push(p);
+  });
+  groups.sort((a, b) =>
+    sort === 'priority' ? (byPriority(a.order, b.order) || ageDays(b.order) - ageDays(a.order))
+                        : (ageDays(b.order) - ageDays(a.order) || a.order.id.localeCompare(b.order.id)));
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
+      <StatusBar />
+      <NavBar title={step.label} onBack={() => navigate('dashboard')} showLogo={false} />
+      <div style={{ flex: 1, overflow: 'auto', padding: '16px 16px 20px' }}>
+        {/* Header: what this step is, how much of it there is.
+            The count is the whole step, not the filtered view: it is what the
+            tile on home said, and a search should not appear to change how much
+            work exists. */}
+        <Card style={{ padding: '14px 16px', marginBottom: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 42, height: 42, borderRadius: 12, background: `${step.colour}14`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+              <StepIcon step={step} size={23} />
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text }}>{step.label}</div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 1 }}>{step.hint}</div>
+            </div>
+            <div style={{ textAlign: 'right', flexShrink: 0 }}>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 22, fontWeight: 700, color: C.text }}>{all.length}</div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 600, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.4 }}>pallets</div>
+            </div>
+          </div>
+        </Card>
+
+        {/* A BC step has no scan behind it. Saying so here stops the queue from
+            reading as a to-do list the operator is failing to clear. */}
+        {isBC && (
+          <div style={{
+            background: '#F8FAFC', border: `1px dashed ${C.border}`, borderRadius: 12,
+            padding: '10px 12px', marginBottom: 12,
+            fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, lineHeight: 1.45,
+          }}>
+            <strong style={{ color: C.text }}>Business Central owns this step.</strong> Nothing here is a
+            scan - the app is waiting for Business Central to move these pallets on.
+          </div>
+        )}
+
+        {/* Narrows this step, not the yard. The placeholder says so, because a
+            search box that silently searched only part of the data would be a
+            trap. */}
+        <SearchBar query={query} setQuery={setQuery} navigate={navigate}
+          placeholder={`Search ${step.label.toLowerCase()}: lot, pallet or product…`} />
+
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: C.text }}>
+            {groups.length} lot{groups.length !== 1 ? 's' : ''} · {queue.length} pallet{queue.length !== 1 ? 's' : ''}
+            {q && all.length !== queue.length ? ` of ${all.length}` : ''}
+          </div>
+          <select value={sort} onChange={e => setSort(e.target.value)} style={{
+            padding: '6px 10px', borderRadius: 8, border: `1px solid ${C.border}`,
+            fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.text, background: '#fff', cursor: 'pointer',
+          }}>
+            <option value="oldest">Sort: Longest waiting</option>
+            {/* The schedule order only means something where the number is shown,
+                so it is offered on the scheduling step and nowhere else. */}
+            {showPriority && <option value="priority">Sort: Schedule</option>}
+          </select>
+        </div>
+
+        {!groups.length && (
+          <div style={{ textAlign: 'center', padding: '34px 16px', color: C.muted, fontFamily: 'DM Sans,sans-serif', fontSize: 13 }}>
+            {q
+              ? `Nothing on ${step.label} matches "${query.trim()}".`
+              : `Nothing is waiting on ${step.label.toLowerCase()} right now.`}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {groups.map(g => (
+            <QueueLotGroup key={g.order.id} group={g} step={step} showPriority={showPriority} forceOpen={!!q}
+              onOpenOrder={o => navigate('order_detail', { selectedOrder: o, orderBack: 'task_queue' })}
+              onOpenPallet={pp => {
+                const go = stepOpens(step, pp, g.order);
+                navigate(go.screen, {
+                  selectedOrder: g.order, selectedPallet: pp, palletId: pp.id,
+                  palletBack: 'task_queue', orderBack: 'task_queue',
+                  // Straight into a step's screen, so the back arrow on it has
+                  // to come back here rather than to wherever that screen
+                  // usually sits in the flow.
+                  queueBack: true,
+                  binPhase: 'pre_treatment', binMoveOnly: false,
+                  ...(go.extras || {}),
+                });
+              }} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ── All Orders: the old home screen, kept as the last tile ───────────────────
+// Ben, 2026-09-10: "Maybe keep the option for all orders view as a final icon on
+// the screen." This is that view, unchanged in what it can do - orders or
+// pallets, the status filters, the search - and moved one tap off home so it is
+// a thing you go and get rather than the thing you are handed.
+//
+// One deletion: the priority number is gone from the order card, and so is
+// sorting by it. "The priority will only be shown during the scheduling step."
+const AllOrdersScreen = ({ navigate, appData }) => {
   const [sort, setSort] = React.useState('date');
   const [filter, setFilter] = React.useState('all');
-  const [query, setQuery] = React.useState('');
-  // Two ways to look at the same yard. "Orders" = customer requests (ORD-…);
+  const [query, setQuery] = React.useState(appData.allOrdersQuery || '');
+  // Which of the two levels this is. "Orders" = customer requests (ORD-…);
   // "Pallets" = the physical units the workflow actually runs on (PLT-…).
-  const [view, setView] = React.useState('orders');
+  // Fixed by the tile that opened the screen, not switchable here: an in-screen
+  // toggle made one screen pretend to be two, and home already asked the
+  // question. One screen, two entrances.
+  const view = appData.allOrdersView === 'pallets' ? 'pallets' : 'orders';
+  const isPallets = view === 'pallets';
 
   // Filters are Steritech's own statuses, plus Hold. The workbook has no hold
   // status, but a held pallet is exactly the thing an operator goes looking for,
@@ -1296,8 +2665,11 @@ const DashboardScreen = ({ navigate, appData }) => {
     { id: 'Dispatched',  label: 'Dispatched' },
     { id: 'hold',        label: 'Hold' },
   ];
+  // Everything on this screen is one site's yard, the site chosen at sign-in.
+  const sitePallets = palletsAtSite(appData.site);
+  const siteOrders  = ordersAtSite(appData.site);
   // Counted by status, so a KPI and a chip can never disagree.
-  const countStatus = st => ALL_PALLETS.filter(p => steritechStatus(p.state) === st).length;
+  const countStatus = st => sitePallets.filter(p => steritechStatus(p.state) === st).length;
   const q = query.trim().toLowerCase();
 
   // One predicate, applied to a pallet state - shared by both views so the
@@ -1310,7 +2682,7 @@ const DashboardScreen = ({ navigate, appData }) => {
   };
 
   // ── Orders view: filter/search at order level, state derived from pallets ──
-  const filteredOrders = SAMPLE_ORDERS.filter(o => {
+  const filteredOrders = siteOrders.filter(o => {
     // An order matches a filter when ANY of its pallets does. Matching on the
     // order's rolled-up state would hide an order with 8 pallets awaiting QA
     // just because one pallet is still at Received.
@@ -1318,126 +2690,52 @@ const DashboardScreen = ({ navigate, appData }) => {
     if (!q) return true;
     // Searching a pallet barcode, a product, a PO or a lot should all surface the
     // order. Lot needs no clause of its own any more - it is the order id.
-    return o.id.toLowerCase().includes(q)
-      || o.customer.toLowerCase().includes(q)
-      || (o.po || '').toLowerCase().includes(q)
-      || orderPallets(o).some(p => p.id.toLowerCase().includes(q)
-        || p.items.some(it => it.name.toLowerCase().includes(q) || it.code.toLowerCase().includes(q)));
+    return orderMatches(o, q);
   });
   const sortedOrders = [...filteredOrders].sort((a, b) => {
-    if (sort === 'status')   return orderStep(a) - orderStep(b);
-    // Process-in and process-out are worked in priority order, so the list can
-    // be put in the same order the floor actually works it. byPriority owns the
-    // direction, because Steritech may still invert the numbering.
-    if (sort === 'priority') return byPriority(a, b) || orderStep(a) - orderStep(b);
+    if (sort === 'status') return orderStep(a) - orderStep(b);
+    // Longest waiting first, because the 10 Sep note is about lots that sit for
+    // weeks. Newest-first buried exactly those.
+    if (sort === 'oldest') return ageDays(b) - ageDays(a);
     return b.id.localeCompare(a.id);
   });
 
   // ── Pallets view: every physical pallet, each judged on its own state ──
-  const filteredPallets = ALL_PALLETS.filter(p => {
+  const filteredPallets = sitePallets.filter(p => {
     if (!stateMatches(p.state)) return false;
     if (!q) return true;
-    return p.id.toLowerCase().includes(q)
-      || p.order.id.toLowerCase().includes(q)
-      || p.order.customer.toLowerCase().includes(q)
-      || p.items.some(it => it.name.toLowerCase().includes(q) || it.code.toLowerCase().includes(q));
+    return palletMatches(p, q);
   });
   const sortedPallets = [...filteredPallets].sort((a, b) => {
-    if (sort === 'status')   return STEP_OF(a) - STEP_OF(b);
-    if (sort === 'priority') return byPriority(a.order, b.order) || STEP_OF(a) - STEP_OF(b);
+    if (sort === 'status') return STEP_OF(a) - STEP_OF(b);
+    if (sort === 'oldest') return ageDays(b.order) - ageDays(a.order);
     return b.id.localeCompare(a.id);
   });
 
   // Under a filter, count only the pallets that actually match it. Counting every
   // pallet of a matching order made this header disagree with the KPI above it:
   // "Released" would read "28 pallets" when only 13 pallets were released.
-  const palletsInView = view === 'orders'
-    ? sortedOrders.reduce((s, o) => s + orderPallets(o).filter(p => stateMatches(p.state)).length, 0)
-    : sortedPallets.length;
+  const palletsInView = isPallets
+    ? sortedPallets.length
+    : sortedOrders.reduce((s, o) => s + orderPallets(o).filter(p => stateMatches(p.state)).length, 0);
   // Name what is being counted, so the number cannot be mistaken for a total.
-  const filterNoun = filter === 'all' ? ''
-    : filter === 'hold' ? 'on hold '
-    : filter.toLowerCase() + ' ';
+  // Hold reads as a suffix - "2 pallets on hold", not "2 on hold pallets".
+  const filterPre  = filter === 'all' || filter === 'hold' ? '' : filter.toLowerCase() + ' ';
+  const filterPost = filter === 'hold' ? ' on hold' : '';
+  const countLine  = (n, noun) => `${n} ${filterPre}${noun}${n !== 1 ? 's' : ''}${filterPost}`;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
       <StatusBar />
-      <NavBar title={`Hello ${(appData.operator || 'Operator').split(' ')[0]}`} showLogo={true} />
+      <NavBar title={isPallets ? 'All Pallets' : 'All Orders'} onBack={() => navigate('dashboard')} showLogo={false} />
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 16px 8px' }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12,
-          padding: '0 10px 0 12px', height: 44, marginBottom: 12,
-        }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
-            <circle cx="11" cy="11" r="7"/>
-            <path d="m21 21-4.3-4.3"/>
-          </svg>
-          <input
-            type="text"
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            placeholder="Search order, pallet, lot or product…"
-            style={{
-              flex: 1, minWidth: 0, border: 'none', outline: 'none',
-              background: 'transparent', height: '100%',
-              fontFamily: 'DM Sans,sans-serif', fontSize: 14, color: C.text,
-            }}
-          />
-          {query && (
-            <button onClick={() => setQuery('')} style={{
-              background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-              display: 'flex', alignItems: 'center', color: C.muted, flexShrink: 0,
-            }} aria-label="Clear">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                <path d="M18 6 6 18M6 6l12 12"/>
-              </svg>
-            </button>
-          )}
-          {/* Identify: "what is this pallet?" - opens the record, changes nothing. */}
-          <button
-            onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null })}
-            title="Scan a pallet label"
-            style={{
-              background: C.brand, border: 'none', borderRadius: 8,
-              height: 32, width: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', flexShrink: 0,
-            }}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
-              <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
-              <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
-              <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
-              <line x1="7" y1="12" x2="17" y2="12"/>
-            </svg>
-          </button>
-        </div>
+        <SearchBar query={query} setQuery={setQuery} navigate={navigate} />
 
         <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
           {/* Counts are PALLETS, not orders - the pallet is the unit of work. */}
           <KPI label="Received" value={countStatus('Received')} color={C.brand} />
           <KPI label="Processing" value={countStatus('Processing')} color={C.amber} />
           <KPI label="QA Review" value={countStatus('QA Review')} color={C.teal || '#0F766E'} />
-        </div>
-
-        {/* Orders vs Pallets - makes the two levels explicit instead of blurring
-            them into one ambiguous list. */}
-        <div style={{
-          display: 'flex', background: '#EDF0F7', borderRadius: 10,
-          padding: 3, marginBottom: 12,
-        }}>
-          {[
-            { id: 'orders',  label: `Orders (${SAMPLE_ORDERS.length})` },
-            { id: 'pallets', label: `Pallets (${ALL_PALLETS.length})` },
-          ].map(v => (
-            <button key={v.id} onClick={() => setView(v.id)} style={{
-              flex: 1, padding: '7px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: view === v.id ? '#fff' : 'transparent',
-              boxShadow: view === v.id ? '0 1px 3px rgba(15,23,42,0.12)' : 'none',
-              fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 700,
-              color: view === v.id ? C.brand : C.muted,
-            }}>{v.label}</button>
-          ))}
         </div>
 
         <div style={{ display: 'flex', gap: 6, marginBottom: 12, overflowX: 'auto', paddingBottom: 4 }}>
@@ -1454,29 +2752,31 @@ const DashboardScreen = ({ navigate, appData }) => {
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: C.text }}>
-            {view === 'orders'
-              ? `${sortedOrders.length} order${sortedOrders.length !== 1 ? 's' : ''} · ${palletsInView} ${filterNoun}pallet${palletsInView !== 1 ? 's' : ''}`
-              : `${sortedPallets.length} ${filterNoun}pallet${sortedPallets.length !== 1 ? 's' : ''}`}
+            {isPallets
+              ? countLine(sortedPallets.length, 'pallet')
+              : `${sortedOrders.length} order${sortedOrders.length !== 1 ? 's' : ''} · ${countLine(palletsInView, 'pallet')}`}
           </div>
           <select value={sort} onChange={e => setSort(e.target.value)} style={{
             padding: '6px 10px', borderRadius: 8, border: `1px solid ${C.border}`,
             fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.text, background: '#fff', cursor: 'pointer',
           }}>
-            <option value="date">Sort: Date</option>
-            <option value="priority">Sort: Priority</option>
+            <option value="date">Sort: Newest</option>
+            <option value="oldest">Sort: Longest waiting</option>
             <option value="status">Sort: Status</option>
+            {/* No "Sort: Priority". Sorting by a number the screen is not allowed
+                to show would be a hidden ordering nobody can check. */}
           </select>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10, paddingBottom: 16 }}>
           {/* ── ORDERS VIEW: one card per customer request ────────────────── */}
-          {view === 'orders' && sortedOrders.map(order => {
+          {!isPallets && sortedOrders.map(order => {
             const oState   = orderState(order);
             const pallets  = orderPallets(order);
             const released = palletsPastQA(order);
             return (
               <Card key={order.id} style={{ padding: '14px 16px', cursor: 'pointer' }}
-                onClick={() => navigate('order_detail', { selectedOrder: order })}>
+                onClick={() => navigate('order_detail', { selectedOrder: order, orderBack: 'all_orders' })}>
                 {/* Commodity is deliberately NOT shown here. An order can carry dozens
                     of different commodities, so any order-level summary is either noise
                     or a half-truth. Commodity belongs on the pallet, which is where the
@@ -1491,7 +2791,10 @@ const DashboardScreen = ({ navigate, appData }) => {
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
                     <StreamBadge stream={order.stream} />
-                    <PriorityChip order={order} />
+                    {/* Priority chip removed - scheduling step only, 10 Sep note.
+                        How long the lot has been sitting replaces it, which is the
+                        thing the covering email actually asked to be visible. */}
+                    <AgeChip order={order} />
                   </div>
                 </div>
                 {(oState === 'QA_RELEASED' || oState === 'QA_HOLD') && (
@@ -1527,11 +2830,11 @@ const DashboardScreen = ({ navigate, appData }) => {
           })}
 
           {/* ── PALLETS VIEW: one card per physical pallet = one workflow run ── */}
-          {view === 'pallets' && sortedPallets.map(p => {
+          {isPallets && sortedPallets.map(p => {
             const order = p.order;
             return (
               <Card key={p.id} style={{ padding: '14px 16px', cursor: 'pointer' }}
-                onClick={() => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id })}>
+                onClick={() => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id, palletBack: 'all_orders', queueBack: false })}>
                 {/* No commodity here either. Every pallet on an order usually carries
                     the same thing, so the name just repeats down the list, and a
                     multi-commodity pallet only gets a "+N more" half-truth. A pallet
@@ -1561,7 +2864,7 @@ const DashboardScreen = ({ navigate, appData }) => {
             );
           })}
 
-          {((view === 'orders' && !sortedOrders.length) || (view === 'pallets' && !sortedPallets.length)) && (
+          {((!isPallets && !sortedOrders.length) || (isPallets && !sortedPallets.length)) && (
             <div style={{
               textAlign: 'center', padding: '32px 16px', color: C.muted,
               fontFamily: 'DM Sans,sans-serif', fontSize: 13,
@@ -1570,55 +2873,6 @@ const DashboardScreen = ({ navigate, appData }) => {
             </div>
           )}
         </div>
-      </div>
-      <div style={{
-        background: '#fff', borderTop: `1px solid ${C.border}`,
-        padding: '6px 4px 10px', display: 'flex',
-      }}>
-        {[
-          {
-            id: 'home', label: 'Home', active: true, onClick: () => {},
-            icon: <><path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1V9.5z"/></>,
-          },
-          {
-            // Work: the operator is at the pallet and wants to move it on.
-            id: 'scan', label: 'Scan', active: false,
-            onClick: () => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null }),
-            icon: <><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></>,
-          },
-          {
-            id: 'profile', label: 'Profile', active: false, onClick: () => navigate('profile'),
-            icon: <><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></>,
-          },
-        ].map(tab => (
-          <button key={tab.id} onClick={tab.onClick} style={{
-            flex: 1, background: 'none', border: 'none', cursor: 'pointer',
-            display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-            padding: '6px 4px', position: 'relative',
-            color: tab.active ? C.brand : C.muted,
-          }}>
-            <div style={{ position: 'relative' }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={tab.active ? '2.4' : '2'} strokeLinecap="round" strokeLinejoin="round">
-                {tab.icon}
-              </svg>
-              {tab.badge && (
-                <div style={{
-                  position: 'absolute', top: -3, right: -6,
-                  minWidth: 14, height: 14, padding: '0 4px', borderRadius: 7,
-                  background: C.red, color: '#fff',
-                  fontFamily: 'DM Sans,sans-serif', fontSize: 9, fontWeight: 700,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  border: '1.5px solid #fff',
-                }}>{tab.badge}</div>
-              )}
-            </div>
-            <span style={{
-              fontFamily: 'DM Sans,sans-serif', fontSize: 11,
-              fontWeight: tab.active ? 700 : 500,
-              color: tab.active ? C.brand : C.muted,
-            }}>{tab.label}</span>
-          </button>
-        ))}
       </div>
     </div>
   );
@@ -1744,7 +2998,8 @@ const palletAction = (pallet, order) => {
                                      ? { label: 'Process Out →',       screen: 'process_out' } : null;
     case 'PROCESS_OUT':            return { label: qaLabel,                      screen: 'qa_status' };
     case 'IN_STORAGE_PROCESSED':   return { label: qaLabel,                      screen: 'qa_status' };
-    case 'QA_RELEASED':            return { label: 'Continue to Packing →', screen: 'packing' };
+    // Straight to column N. Packing is not a step on this sheet.
+    case 'QA_RELEASED':            return { label: 'Dispatch →',            screen: 'dispatch' };
     case 'QA_HOLD':                return { label: 'View QA Hold Details →',     screen: 'qa_hold', extras: { pdrReference: 'PDR-2026-007' } };
     default:                       return null;
   }
@@ -1758,12 +3013,15 @@ const OrderDetailScreen = ({ navigate, appData }) => {
   const released  = palletsPastQA(order);
   const isShipped = oState === 'SHIPPED';
 
-  const openPallet = p => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id });
+  const openPallet = p => navigate('pallet_detail', { selectedOrder: order, selectedPallet: p, palletId: p.id, palletBack: 'order_detail', queueBack: false });
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
       <StatusBar />
-      <NavBar title={order.id} onBack={() => navigate('dashboard')} showLogo={false} />
+      {/* An order is reachable from the step queue, from All Orders and from a
+          search hit, so the back arrow follows how the operator got here rather
+          than always dropping them on home. */}
+      <NavBar title={order.id} onBack={() => navigate(appData.orderBack || 'dashboard')} showLogo={false} />
       <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
         {/* Hand-back from QA. These are order-wide signals: "released" only
             once every pallet cleared, "hold" as soon as any one pallet is held. */}
@@ -1803,7 +3061,11 @@ const OrderDetailScreen = ({ navigate, appData }) => {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <StreamBadge stream={order.stream} />
-            <PriorityChip order={order} />
+            {/* No priority chip. Ben, 2026-09-10: "the priority will only be
+                shown during the scheduling step." How long the lot has been
+                sitting is the thing that belongs here instead - his covering
+                email is about lots that wait weeks. */}
+            <AgeChip order={order} />
           </div>
         </div>
 
@@ -1933,7 +3195,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
       <StatusBar />
-      <NavBar title={pallet.id} onBack={() => navigate('order_detail', { selectedOrder: order })} showLogo={false} />
+      <NavBar title={pallet.id} onBack={() => navigate(appData.palletBack || 'order_detail', { selectedOrder: order })} showLogo={false} />
       <div style={{ flex: 1, overflow: 'auto', padding: '16px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
           <div>
@@ -2024,6 +3286,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
                       )}
                     </div>
                     <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2 }}>{tStep.desc}</div>
+
                   </div>
                 </div>
               );
@@ -2139,7 +3402,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
             <div style={{ marginBottom: 6 }}>
               {groupByState(lotPending).map(g => (
                 <PalletGroupSection key={g.state} group={g} onOpen={p => navigate('pallet_detail', {
-                  selectedOrder: order, selectedPallet: p, palletId: p.id,
+                  selectedOrder: order, selectedPallet: p, palletId: p.id, palletBack: appData.palletBack,
                 })} />
               ))}
             </div>
@@ -2386,7 +3649,7 @@ const ScanBinScreen = ({ navigate, appData }) => {
     ? 'Scan the bin where the treated pallet will be stored'
     : 'Scan the bin where the pallet will be stored';
   return (
-    <PageWrapper title={appData.binMoveOnly ? 'Move Bin' : 'Scan Bin Location'} onBack={() => navigate(appData.binMoveOnly ? 'pallet_detail' : phase === 'post_treatment' ? 'pallet_detail' : 'print_labels')}
+    <PageWrapper title={appData.binMoveOnly ? 'Move Bin' : 'Scan Bin Location'} onBack={() => navigate(appData.queueBack ? 'task_queue' : appData.binMoveOnly ? 'pallet_detail' : phase === 'post_treatment' ? 'pallet_detail' : 'print_labels')}
       bottomBar={
         <button onClick={() => { invalid.current = true; navigate('fail', { failMessage: 'Invalid location scan - bin not recognised in system.', retryScreen: 'scan_bin' }); }}
           style={{ width:'100%', background:'none', border:'none', color: C.muted, fontFamily:'DM Sans,sans-serif', fontSize:13, cursor:'pointer' }}>
@@ -2628,6 +3891,19 @@ const BC_PRODUCTS = {
     { code: 'PRD-2231', name: 'Table Grapes - Crimson', dose: '0.4 - 1.0 kGy' },
     { code: 'PRD-2236', name: 'Table Grapes - Menindee', dose: '0.4 - 1.0 kGy' },
   ],
+  'Gippsland Market Gardens': [
+    { code: 'PRD-2340', name: 'Sweet Corn - Bicolour', dose: '0.4 - 1.0 kGy' },
+    { code: 'PRD-2344', name: 'Green Beans - Round',   dose: '0.4 - 1.0 kGy' },
+  ],
+  'Glass House Tropicals': [
+    { code: 'PRD-2350', name: 'Pineapples - Smooth Cayenne', dose: '0.4 - 1.0 kGy' },
+    { code: 'PRD-2354', name: 'Lychees - Kwai May Pink',     dose: '0.4 - 1.0 kGy' },
+  ],
+  'Yarra Valley Berries': [
+    { code: 'PRD-2302', name: 'Strawberries - 250g punnets', dose: '0.4 - 1.0 kGy' },
+    { code: 'PRD-2305', name: 'Raspberries - 125g punnets',  dose: '0.4 - 1.0 kGy' },
+    { code: 'PRD-2308', name: 'Blueberries - 125g punnets',  dose: '0.4 - 1.0 kGy' },
+  ],
 };
 // Anything the customer has no catalogue for still needs something to match
 // against, so a small shared set stands in for the rest of BC.
@@ -2689,7 +3965,10 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
   // the side rather than written over the order, so the row can show both the
   // corrected value and what the customer originally sent.
   const [corrections, setCorrections] = React.useState({});
-  const [editing, setEditing]         = React.useState(false);
+  // Step 1 is read only. The workbook's arrival form does not include
+  // correcting the customer's order-level fields, so the toggle that used to
+  // turn these rows into inputs is gone and this stays false.
+  const editing = false;
   const correct = (label, v) => setCorrections(c => ({ ...c, [label]: v }));
   const correctedCount = Object.keys(corrections)
     .filter(k => corrections[k] !== undefined).length;
@@ -2800,7 +4079,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
   };
   const back = () => {
     if (step > 1) setStep(step - 1);
-    else navigate('pallet_detail');
+    else navigate(appData.queueBack ? 'task_queue' : 'pallet_detail');
   };
 
   const STEP_TITLES = ['Order details', 'Product lines', 'Arrival checks'];
@@ -2849,24 +4128,11 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 Submitted by customer
               </div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: '#4F46E5', lineHeight: 1.4 }}>
-                {editing
-                  ? 'Correct anything that does not match what arrived. The original stays on record.'
-                  : 'Verify against what arrived. Correct any field that is wrong, then continue.'}
+                Check this against what actually turned up. What the customer
+                submitted is the record; the product lines and the arrival
+                checks are what you capture.
               </div>
-              {correctedCount > 0 && (
-                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: '#312E81', marginTop: 5, fontWeight: 600 }}>
-                  {correctedCount} field{correctedCount === 1 ? '' : 's'} corrected by Steritech
-                </div>
-              )}
             </div>
-            {/* One toggle, not a pencil per row. The submission is the record
-                until someone deliberately decides to change it. */}
-            <button onClick={() => setEditing(e => !e)} style={{
-              flexShrink: 0, background: editing ? C.brand : '#fff',
-              color: editing ? '#fff' : C.brand, border: `1px solid ${C.brand}`,
-              borderRadius: 8, padding: '6px 12px', cursor: 'pointer',
-              fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700,
-            }}>{editing ? 'Done' : 'Correct'}</button>
           </div>
 
         </div>
@@ -3048,6 +4314,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
               })}
             </div>
 
+          
             <SectionTitle title="Damaged pallet or cartons" subtitle="Photograph anything that arrived damaged" />
             <div onClick={addDamage} style={{
               borderRadius: 12, cursor: 'pointer', marginBottom: 10,
@@ -3117,7 +4384,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                   <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
                     {unmatched > 0 && `${unmatched} product line${unmatched !== 1 ? 's' : ''} still unmatched. `}
                     {pendingQA > 0 && `${pendingQA} new product${pendingQA !== 1 ? 's' : ''} waiting on QA to create ${pendingQA !== 1 ? 'them' : 'it'} in Business Central. `}
-Go back to step 3, Product lines.
+                    Go back to step 2, Product lines.
                   </div>
                 </div>
               </div>
@@ -3386,7 +4653,18 @@ Object.assign(window, {
   palletOf, palletAction,
   orderOfPallet,
   PalletRowCard, PalletGroupSection, PriorityChip, BCStepsNote,
-  SplashScreen, ScanEmployeeScreen, DashboardScreen, OrderDetailScreen, PalletDetailScreen,
+  // The 10 Sep rebuild. WORK_STEPS is the task list the home flow is built from,
+  // and the ageing helpers are read by the process screens in the next block too.
+  WORK_STEPS, stepByKey, stepQueue, stepOfPallet, stepOpens, stepOverdue, stepHolds,
+  SITES, SERVICE_LABEL, SERVICE_SHORT, SERVICE_COLOUR,
+  siteOf, siteByCode, siteLabel,
+  ordersAtSite, palletsAtSite, SiteSelectScreen, SiteRow,
+  PRIORITY_VISIBLE_AT, priorityVisibleAt,
+  DEMO_TODAY, AGE_WATCH, AGE_WARN, orderDate, ageDays, ageTone, AgeChip,
+  SidePanel, SearchBar, palletMatches, orderMatches, QueueLotGroup, StepIcon,
+  LOT_AUTO_OPEN, LOT_PREVIEW,
+  SplashScreen, ScanEmployeeScreen, DashboardScreen, TaskQueueScreen, AllOrdersScreen,
+  OrderDetailScreen, PalletDetailScreen,
   TIMELINE_STEPS, STATUS_ORDER, statusIndex, STATE_TO_STEP, KPI,
   ScanPalletScreen,
   ScanBinScreen, SummaryScreen, ReceivingFormScreen, PrintLabelsScreen,
@@ -3441,13 +4719,15 @@ const ProcessInScreen = ({ navigate, appData }) => {
   // "May view multiple Lot Number's if granted same priority level." Other lots
   // sharing this priority are listed so the operator can see the whole queue at
   // their level, not just the one lot they came in on.
-  const samePriority = SAMPLE_ORDERS
+  // Scoped to the operator's own site: another site's schedule is not their
+  // queue and they cannot walk to it.
+  const samePriority = ordersAtSite(appData.site)
     .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
       && lotGate(o, 5).done < lotGate(o, 5).total)
     .sort(byPriority);
 
   return (
-    <PageWrapper title="Process In" onBack={() => navigate('pallet_detail')}
+    <PageWrapper title="Process In" onBack={() => navigate(appData.queueBack ? 'task_queue' : 'pallet_detail')}
       bottomBar={
         <Btn label={scanned ? 'Continue →' : 'Scan the process bin to continue'}
           onClick={() => navigate('pallet_detail')}
@@ -3467,10 +4747,16 @@ const ProcessInScreen = ({ navigate, appData }) => {
             <span style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 13, fontWeight: 700, color: C.text }}>
               {lotOf(order)}
             </span>
-            <PriorityChip order={order} />
+            {/* The lot's schedule number is no longer printed here. Ben,
+                2026-09-10: "the priority will only be shown during the
+                scheduling step." The 19 Aug workbook does put a same-priority
+                listing on the process screens, so the QUEUE below is untouched -
+                only the number is gone. PRIORITY_VISIBLE_AT puts it back. */}
+            <AgeChip order={order} />
           </div>
           <InfoRow label="Customer Name" value={order.customer} />
-          <InfoRow label="Qty of Pallets Processed In"
+          {/* The workbook's own label, used on column I and column K alike. */}
+          <InfoRow label="Qty of Pallets Picked"
             value={`${gate.done} of ${gate.total}`} />
           {/* One bar filled by proportion, not one segment per pallet. A lot can
               carry 20 pallets and 20 slivers reads as noise. */}
@@ -3513,8 +4799,10 @@ const ProcessInScreen = ({ navigate, appData }) => {
         {samePriority.length > 0 && (
           <>
             <div style={{ height: 18 }}/>
-            <SectionTitle title={`Also at ${priorityLabel(order)}`}
-              subtitle="Same priority level, waiting to be processed in. This lot is the one in action." />
+            {/* Same list, same order - it is still sorted by the schedule
+                number underneath. Only the heading stopped quoting it. */}
+            <SectionTitle title="Also in this schedule run"
+              subtitle="Scheduled alongside this lot, waiting to be processed in. This lot is the one in action." />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
                 const g = lotGate(o, 5);
@@ -3539,7 +4827,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
                 fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted,
                 marginTop: 8, textAlign: 'center',
               }}>
-                and {samePriority.length - SAME_PRIORITY_PREVIEW} more at this priority
+                and {samePriority.length - SAME_PRIORITY_PREVIEW} more in this run
               </div>
             )}
           </>
@@ -3582,13 +4870,13 @@ const ProcessOutScreen = ({ navigate, appData }) => {
 
   // Same rule as process in: the queue is worked by priority and several lots can
   // sit at one level, so the rest of the level is listed.
-  const samePriority = SAMPLE_ORDERS
+  const samePriority = ordersAtSite(appData.site)
     .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
       && lotGate(o, 6).done < lotGate(o, 6).total)
     .sort(byPriority);
 
   return (
-    <PageWrapper title="Process Out" onBack={() => navigate('pallet_detail')}
+    <PageWrapper title="Process Out" onBack={() => navigate(appData.queueBack ? 'task_queue' : 'pallet_detail')}
       bottomBar={
         <Btn label={!lotAllProcessedIn(order)
               ? 'Waiting on the rest of the lot'
@@ -3608,7 +4896,12 @@ const ProcessOutScreen = ({ navigate, appData }) => {
             <span style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 13, fontWeight: 700, color: C.text }}>
               {lotOf(order)}
             </span>
-            <PriorityChip order={order} />
+            {/* The lot's schedule number is no longer printed here. Ben,
+                2026-09-10: "the priority will only be shown during the
+                scheduling step." The 19 Aug workbook does put a same-priority
+                listing on the process screens, so the QUEUE below is untouched -
+                only the number is gone. PRIORITY_VISIBLE_AT puts it back. */}
+            <AgeChip order={order} />
           </div>
           <InfoRow label="Customer Name" value={order.customer} />
           <InfoRow label="Qty of Pallets Picked" value={`${gate.done} of ${gate.total}`} />
@@ -3683,8 +4976,8 @@ const ProcessOutScreen = ({ navigate, appData }) => {
         {samePriority.length > 0 && (
           <>
             <div style={{ height: 18 }}/>
-            <SectionTitle title={`Also at ${priorityLabel(order)}`}
-              subtitle="Same priority level, waiting to be processed out. This lot is the one in action." />
+            <SectionTitle title="Also in this schedule run"
+              subtitle="Scheduled alongside this lot, waiting to be processed out. This lot is the one in action." />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
                 const g = lotGate(o, 6);
@@ -3706,7 +4999,7 @@ const ProcessOutScreen = ({ navigate, appData }) => {
             </div>
             {samePriority.length > SAME_PRIORITY_PREVIEW && (
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 8, textAlign: 'center' }}>
-                and {samePriority.length - SAME_PRIORITY_PREVIEW} more at this priority
+                and {samePriority.length - SAME_PRIORITY_PREVIEW} more in this run
               </div>
             )}
           </>
@@ -3854,7 +5147,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
   // the app only reports what came back.
   let bottom;
   if (shown === 'released') {
-    bottom = <Btn label="Continue to Dispatch →" onClick={() => navigate('packing')} color="green" large />;
+    bottom = <Btn label="Continue to Dispatch →" onClick={() => navigate('dispatch')} color="green" large />;
   } else if (shown === 'hold') {
     bottom = <Btn label="View QA Hold Details" onClick={() => navigate('qa_hold', { pdrReference: 'PDR-2026-007' })} color="darkRed" large />;
   } else {
@@ -3862,7 +5155,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
   }
 
   return (
-    <PageWrapper title="QA Status" onBack={() => navigate('dashboard')}
+    <PageWrapper title="QA Status" onBack={() => navigate(appData.queueBack ? 'task_queue' : 'dashboard')}
       bottomBar={bottom}>
       <div style={{ padding: '20px 16px' }}>
         {/* QA review itself is a Business Central operation - the app shows the
@@ -3885,7 +5178,12 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
             <span style={{ fontFamily: 'ui-monospace,Menlo,monospace', fontSize: 13, fontWeight: 700, color: C.text }}>
               {lotOf(order)}
             </span>
-            <PriorityChip order={order} />
+            {/* The lot's schedule number is no longer printed here. Ben,
+                2026-09-10: "the priority will only be shown during the
+                scheduling step." The 19 Aug workbook does put a same-priority
+                listing on the process screens, so the QUEUE below is untouched -
+                only the number is gone. PRIORITY_VISIBLE_AT puts it back. */}
+            <AgeChip order={order} />
           </div>
           <InfoRow label="Customer Name" value={order.customer} />
           <InfoRow label="Qty of Pallets Picked" value={`${gate.done} of ${gate.total}`} />
@@ -3990,6 +5288,14 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
 };
 
 // ── Packing ───────────────────────────────────
+// NOT ON THE 19 AUG WORKBOOK. The IRR sheet runs Created, Received, Processing,
+// QA Review, Released, Dispatched, and its last column is "Dispatch (TBC)" -
+// there is no packing column anywhere on it. This screen was built in an earlier
+// round and is kept because Steritech does sell a GMP Packing and Labelling
+// service, so a packing flow may well be real - just not on the irradiation
+// sheet. It is off the operator's path and reachable only from the Tweaks menu
+// until Steritech confirms whether packing is a scanned step and what it
+// captures.
 const PackingScreen = ({ navigate, appData }) => {
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallet = palletOf(appData, order);
@@ -3998,7 +5304,7 @@ const PackingScreen = ({ navigate, appData }) => {
   const items = pallet.items;
 
   return (
-    <PageWrapper title="Packing" onBack={() => navigate('qa_status')}
+    <PageWrapper title="Packing (not on the 19 Aug workbook)" onBack={() => navigate('qa_status')}
       bottomBar={
         packed
           /* The pallet state is deliberately NOT advanced here. Dispatch is
@@ -4138,7 +5444,7 @@ const DispatchScreen = ({ navigate, appData }) => {
   };
 
   return (
-    <PageWrapper title="Dispatch" onBack={() => navigate('packing')}
+    <PageWrapper title="Dispatch" onBack={() => navigate(appData.queueBack ? 'task_queue' : 'pallet_detail')}
       bottomBar={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <Btn label="Confirm Dispatch" onClick={handleConfirm} color="green" />
@@ -4423,12 +5729,16 @@ const ProfileScreen = ({ navigate, appData }) => {
               }}>Warehouse Operator</span>
             }
           />
-          <InfoRow label="Facility"     value="Steritech Wetherill Park" />
+          <InfoRow label="Site" value={siteLabel(appData.site)} />
           <InfoRow label="Email"        value="pan.xiao@steritech.com.au" />
           <InfoRow label="App version"  value="1.0.0" />
         </Card>
 
-        <Btn label="Sign Out" onClick={() => navigate('splash', { operator: '' })} color="red" outline />
+        {/* An operator can be moved to another site mid-shift, so changing site
+            is a normal action, not a sign-out. */}
+        <Btn label="Change Site" onClick={() => navigate('site_select')} color="blue" outline />
+        <div style={{ height: 10 }}/>
+        <Btn label="Sign Out" onClick={() => navigate('splash', { operator: '', site: null })} color="red" outline />
       </div>
     </PageWrapper>
   );
@@ -4450,7 +5760,10 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 const SCREEN_MAP = {
   splash:                   SplashScreen,
   scan_employee:            ScanEmployeeScreen,
+  site_select:              SiteSelectScreen,
   dashboard:                DashboardScreen,
+  task_queue:               TaskQueueScreen,
+  all_orders:               AllOrdersScreen,
   order_detail:             OrderDetailScreen,
   pallet_detail:            PalletDetailScreen,
   scan_pallet:              ScanPalletScreen,
@@ -4488,6 +5801,31 @@ function App() {
     failMessage: '',
     retryScreen: 'scan_bin',
     prevScreen: null,
+    // The site this operator picked after scanning their badge. Every list in
+    // the app is scoped to it. Null only on a Tweaks deep link, where showing
+    // every site is the honest fallback.
+    site: null,
+    // ── 10 Sep rebuild ────────────────────────────────────────────────────────
+    // Which step's queue is open. A key from WORK_STEPS, never a step name.
+    //
+    // There is deliberately no "my step for this shift" here. Ben's note says
+    // "one person may be ASSIGNED to a specific step", and the app "receives
+    // tasks from the server" - so if an operator is held on one step for a
+    // shift, a supervisor sets that when the shift is planned and it arrives on
+    // the sign-in payload. A button on the device letting the operator pick
+    // their own step was our reading of that sentence, and the wrong way round.
+    // See flag F10 in docs/STERISCAN-REV2-HOME-REBUILD.md.
+    taskStep: WORK_STEPS[0].key,
+    // Where the back arrow goes. An order or a pallet is now reachable from the
+    // step queue, from All Orders and from a search hit, so each caller says
+    // where it came from instead of every screen assuming home.
+    orderBack: 'dashboard',
+    palletBack: 'order_detail',
+    allOrdersQuery: '',
+    allOrdersView: 'orders',
+    // Set when a step queue opened a work screen directly, so that screen's
+    // back arrow returns to the queue instead of to wherever it normally sits.
+    queueBack: false,
     overrideReason: '',
     supervisorName: '',
     overrideNotes: '',
