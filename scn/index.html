@@ -60,13 +60,15 @@
   <select id="tweak-screen">
     <option value="">- choose -</option>
     <option value="splash">Splash</option>
-    <option value="site_select">Site Select (after badge scan)</option>
+    <option value="site_select">Site Select (IT / admin only)</option>
+    <option value="stream_select">Stream Select (after badge scan)</option>
     <option value="dashboard">Home (process flow)</option>
     <option value="task_queue">Task Queue (one step)</option>
     <option value="all_orders">All Orders (full list)</option>
     <option value="order_detail">Order Detail (ORD - pallet list)</option>
     <option value="pallet_detail">Pallet Detail (PLT - workflow)</option>
-    <option value="scan_pallet">Scan Pallet (after Dashboard)</option>
+    <option value="scan_pallet">Pallet/Order Search (scan or search)</option>
+    <option value="incident">On Hold / Damage (form)</option>
     <option value="scan_bin">Scan Bin Location</option>
     <option value="summary">Pallet Summary (demo only - no route)</option>
     <option value="receiving_form">Arrival Form (product-line matching)</option>
@@ -725,6 +727,9 @@ const bulkPallets = (prefix, product, code, states) => states.map((state, i) => 
   };
 });
 
+// The site this operator's account is set to. In production it arrives with the
+// sign-in payload; the demo operator works Merrifield.
+const ACCOUNT_SITE = 'MER';
 const SITES = [
   { code: 'MER', name: 'Merrifield',     state: 'VIC', address: '1725 Mickleham Rd, Merrifield VIC 3064',     services: ['Gamma', 'GMP'] },
   { code: 'DAN', name: 'Dandenong',      state: 'VIC', address: '14 Williamson Rd, Dandenong South VIC 3175', services: ['Gamma', 'ETO'] },
@@ -1371,12 +1376,14 @@ const SplashScreen = ({ navigate }) => {
 const ScanEmployeeScreen = ({ navigate }) => {
   const [pin, setPin] = React.useState('');
   const [mode, setMode] = React.useState('scan'); // 'scan' | 'pin'
-  // An employee can belong to any of the four sites, so the badge identifies the
-  // person and the next screen asks which yard they are standing in. Nothing in
-  // the app has a site until that question is answered.
-  const handleScan = () => navigate('site_select', { operator: 'Pan Xiao' });
+  // Rev3: the site comes from the ACCOUNT ("needs to be set at account level"), so
+  // the badge scan passes the account's site on and the next page has it picked
+  // already. That page lists every site the operator has access to as well as the
+  // three streams, so they can still choose another site there (FDB-308).
+  const signIn = () => navigate('stream_select', { operator: 'Pan Xiao', site: ACCOUNT_SITE, workStream: null });
+  const handleScan = () => signIn();
   const handlePin = () => {
-    if (pin.length >= 4) navigate('site_select', { operator: 'Pan Xiao' });
+    if (pin.length >= 4) signIn();
   };
   return (
     <PageWrapper title="Sign In" showLogo={true}>
@@ -1514,6 +1521,52 @@ const siteLabel   = code => { const x = siteByCode(code); return x ? `${x.name},
 const ordersAtSite  = code => code ? SAMPLE_ORDERS.filter(o => siteOf(o) === code) : SAMPLE_ORDERS;
 const palletsAtSite = code => code ? ALL_PALLETS.filter(p => siteOf(p.order) === code) : ALL_PALLETS;
 
+// ── Work stream (rev3, FDB-308) ──────────────────────────────────────────────
+// "Isolation is at the highest level, IRR, PACK, ETO." Each of these runs in its
+// own "black box", so each has its own schedule: an IRR order with a higher
+// priority must not stop PACKING from scanning its next order. The operator says
+// which one they are working right after sign-in, so a scanner can be shared by
+// streams as well as by sites.
+//
+// The site's services are the same three in the portal's words (Gamma, ETO, GMP),
+// mapped here onto the three stream keys an order carries.
+// Business Central has not yet said how it will segregate streams between sites
+// and processes (the rev3 notes say so), so this is a view filter only.
+const SERVICE_STREAM = { Gamma: 'irradiation', ETO: 'eto', GMP: 'packing' };
+const STREAM_LABEL   = { irradiation: 'Irradiation', eto: 'EtO', packing: 'Packing' };
+const STREAM_SHORT   = { irradiation: 'IRR', eto: 'ETO', packing: 'PACK' };
+const STREAM_ORDER   = ['irradiation', 'eto', 'packing'];
+// The streams offered to an operator. Always all three. The workbook has one tab
+// per stream (IRR, EtO, Packing), and a site's service list on the customer portal
+// says what customers can BOOK there, not what the floor is allowed to scan, so
+// narrowing the picker to it hid streams the business has. A stream a site has no
+// work for simply shows zero.
+const streamsAtSite = code => STREAM_ORDER.slice();
+// null / 'all' means no stream chosen, which only happens on a Tweaks deep link.
+const streamMatches = (order, stream) =>
+  !stream || stream === 'all' || (order && order.stream) === stream;
+const palletsInScope = (site, stream) => palletsAtSite(site).filter(p => streamMatches(p.order, stream));
+const ordersInScope  = (site, stream) => ordersAtSite(site).filter(o => streamMatches(o, stream));
+
+// ── Operator holds and damage (rev3, FDB-307) ────────────────────────────────
+// A flag on the pallet, NOT a new workflow state. QA_HOLD belongs to Business
+// Central (a PDR raised by QA); this is the floor saying "something is wrong with
+// this pallet, do not move it". Keeping it off the state machine means every
+// count and gate that reads pallet.state is unchanged, and clearing the flag puts
+// the pallet exactly where it was.
+// Like advancePallet, it has to be written on every copy of the pallet.
+const setPalletHold = (pallet, hold) => {
+  if (!pallet) return;
+  const parent = orderOfPallet(pallet.id);
+  [...orderPallets(parent), ...ALL_PALLETS, pallet]
+    .filter(p => p && p.id === pallet.id)
+    .forEach(p => { p.hold = hold || null; });
+};
+const isHeld     = p => !!(p && p.hold);
+const holdLabel  = p => !p || !p.hold ? '' : (p.hold.kind === 'damage' ? 'DAMAGED' : 'ON HOLD');
+// Up until final dispatch, per the rev3 note. A shipped pallet is off site.
+const canRaiseIncident = p => !!p && p.state !== 'SHIPPED';
+
 // Resolve a pallet id back to the order that owns it.
 const orderOfPallet = palletId => {
   const hit = ALL_PALLETS.find(p => p.id === palletId);
@@ -1530,6 +1583,30 @@ const advancePallet = (pallet, state, bin) => {
     .filter(p => p && p.id === pallet.id)
     .forEach(p => { p.state = state; if (bin !== undefined) p.bin = bin; });
 };
+
+// ── Arrival memory (rev3, FDB-303 / FDB-304 / FDB-305) ───────────────────────
+// There is no backend in this mockup, so what the operator has captured has to be
+// kept somewhere that outlives the arrival screen. Three small stores, all keyed
+// so a pallet or a lot finds its own data again.
+//
+//   ARRIVAL_DRAFTS   one pallet's capture, saved when receiving is blocked on a
+//                    product line QA still has to create. "Ideally, if I was to
+//                    enter the truck temperature ... this should remain until the
+//                    product is created by QA and the process flow can continue."
+//   ORDER_ARRIVAL    order-level fields, entered once and carried into every
+//                    pallet of the lot. Truck temperature is the example Ben
+//                    gave: it is the truck's, not the pallet's.
+//   LABELS_WAITING   pallets whose label has printed but has not been attached
+//                    yet, because the operator carried on to the next receival
+//                    instead of walking to the printer.
+const ARRIVAL_DRAFTS = {};
+const ORDER_ARRIVAL  = {};
+const LABELS_WAITING = new Set();
+const draftFor       = p => (p && ARRIVAL_DRAFTS[p.id]) || null;
+const labelsWaiting  = order => orderPallets(order).filter(p => LABELS_WAITING.has(p.id)).length;
+const draftsFor      = order => orderPallets(order).filter(p => ARRIVAL_DRAFTS[p.id]).length;
+// The printer a label goes to. One per site, named by site code.
+const printerFor     = order => `PRN-${siteOf(order)}-01`;
 
 // Resolve the pallet a screen is acting on, falling back safely for deep-links
 // from the Tweaks "Jump to Screen" menu.
@@ -1733,16 +1810,42 @@ const WORK_STEPS = [
     // only required/given at the scheduling stage" and "the priority will only be
     // shown during the scheduling step." Scheduling itself is Business Central's,
     // so this is the scheduled queue, read only, worked top down.
+    //
+    // Rev3 (FDB-306): "Scheduling doesn't make sense as an individual card." It is
+    // Business Central's step with nothing to scan, so the card is gone from home.
+    // The step stays in this array on purpose: the lists must still cover every
+    // pallet state, and a pallet waiting on the schedule still has to belong to
+    // something. What the operator sees of it is the Full schedule tab on Process
+    // In (FDB-301), read only, with the priorities.
     key: 'scheduling', label: 'Scheduling', hint: 'Waiting on the schedule',
     states: ['IN_STORAGE_UNPROCESSED'], owner: 'bc', showPriority: true, colour: '#7C3AED',
+    hidden: true,
     // Business Central's step. Nothing to open, so the row opens the record.
     opens: 'pallet_detail',
     icon: <><path d="M6.8 2h2.2v3.4H6.8zM15 2h2.2v3.4H15z"/><path d="M2.6 6.4a1.6 1.6 0 0 1 1.6-1.6h15.6a1.6 1.6 0 0 1 1.6 1.6v2.2H2.6V6.4z"/><path d="M2.6 10.4h18.8v9.6a1.6 1.6 0 0 1-1.6 1.6H4.2a1.6 1.6 0 0 1-1.6-1.6v-9.6z" opacity=".35"/><path d="M5.4 12.6h3.8v3.8H5.4z"/><path d="M11.2 13.4h7.4v1.6h-7.4zM11.2 17.4h7.4v1.6h-7.4z" opacity=".6"/></>,
   },
   {
+    // Rev3 (FDB-301): a SINGLE-PICK step. The operator is told which order is
+    // next by the schedule and works only that one; any pallet inside it can be
+    // picked in any order. The full schedule is a second tab with no scanning.
+    //   pickStates      pallets the operator can scan right now (Business Central
+    //                   has scheduled them)
+    //   scheduleStates  every pallet that is still on the way through this step,
+    //                   which is what the Full schedule tab lists
+    //   orderBy         'priority' follows the number Business Central set at
+    //                   scheduling, 'oldest' is the stand-in where nothing else
+    //                   orders the work (see Dispatch)
     key: 'process_in', label: 'Process In', hint: 'Scan pallets into the process bin',
     states: ['STAGED'], owner: 'scan', showPriority: false, colour: '#D97706',
     opens: 'process_in',
+    pick: {
+      pickStates: ['STAGED'], scheduleStates: ['IN_STORAGE_UNPROCESSED', 'STAGED'],
+      orderBy: 'priority', tabs: ['Next up', 'Full schedule'],
+      verb: 'process in', instruction: 'pick',
+      // Pallets at or past this internal step count as done, and what the count
+      // is called on the card. Step 5 is the process bin.
+      doneStep: 5, doneLabel: 'Qty of Pallets Picked',
+    },
     icon: <><path d="M10.4 1.6h3.2v6.2l2.4-2.4 2.2 2.2L12 13.8 5.8 7.6 8 5.4l2.4 2.4V1.6z"/><path d="M2.6 14.6h18.8a1.6 1.6 0 0 1 1.6 1.6v4.2a1.6 1.6 0 0 1-1.6 1.6H2.6A1.6 1.6 0 0 1 1 20.4v-4.2a1.6 1.6 0 0 1 1.6-1.6z" opacity=".35"/><path d="M7.4 17.4h9.2v2.4H7.4z"/></>,
   },
   {
@@ -1764,9 +1867,22 @@ const WORK_STEPS = [
     // reachable from the Tweaks menu, but it is no longer on the operator's
     // path, because putting it there states a step Steritech has not written
     // down.
+    //
+    // Rev3 (FDB-301) lists Dispatch with Process In as a strict, order-level step.
+    // Nothing in the notes says what orders the work: the whiteboard has Business
+    // Central building a load plan after release, and that is not in the data.
+    // Until it is, the next order is the longest waiting one, and the screen says
+    // so rather than implying a load plan exists.
     key: 'dispatch', label: 'Dispatch', hint: 'Load out and dispatch',
     states: ['QA_RELEASED'], owner: 'scan', showPriority: false, colour: '#008D02',
     opens: 'dispatch',
+    pick: {
+      pickStates: ['QA_RELEASED'], scheduleStates: ['QA_RELEASED'],
+      orderBy: 'oldest', tabs: ['Next up', 'All ready'],
+      verb: 'dispatch', instruction: 'load',
+      // Step 9 is SHIPPED.
+      doneStep: 9, doneLabel: 'Qty of Pallets Dispatched',
+    },
     icon: <><path d="M1.4 5.4h11.9v11.4H2.6a1.2 1.2 0 0 1-1.2-1.2V5.4z" opacity=".35"/><path d="M13.9 9h3.5a1.2 1.2 0 0 1 .96.49l2.25 3.1a1.2 1.2 0 0 1 .23.71v3.5h-6.94V9z"/><path d="M6.3 14.6a2.7 2.7 0 1 1 0 5.4 2.7 2.7 0 0 1 0-5.4zm11.1 0a2.7 2.7 0 1 1 0 5.4 2.7 2.7 0 0 1 0-5.4z"/></>,
   },
 ];
@@ -1782,7 +1898,9 @@ const StepIcon = ({ step, size = 24, colour }) => (
 const stepByKey  = key => WORK_STEPS.find(s => s.key === key) || WORK_STEPS[0];
 // Site is passed in rather than read from a global, so the same helper serves
 // the home counts, the queue screen and anything later that needs a count.
-const stepQueue  = (step, site) => palletsAtSite(site).filter(p => step.states.indexOf(p.state) >= 0);
+// Stream is optional and narrows the same list: with a stream chosen at sign-in,
+// the home counts and every queue are that stream's work only.
+const stepQueue  = (step, site, stream) => palletsInScope(site, stream).filter(p => step.states.indexOf(p.state) >= 0);
 // Which step a pallet is waiting on. Used by search results, so a hit says what
 // to do with the thing that was found instead of only naming it.
 const stepOfPallet = p => WORK_STEPS.find(s => s.states.indexOf(p.state) >= 0) || null;
@@ -1804,9 +1922,14 @@ const stepOpens = (step, pallet, order) => {
 // "the priority will only be shown during the scheduling step". This is the one
 // place that decides it. The 19 Aug workbook does put a same-priority lot listing
 // on process in (column J) and process out (column L), so those screens still
-// show the queue - they just no longer print the number. Adding 'process_in' and
-// 'process_out' here puts it back.
-const PRIORITY_VISIBLE_AT = ['scheduling'];
+// show the queue - they just no longer print the number. Adding 'process_out'
+// here puts it back there.
+//
+// Rev3 moved it. The Scheduling card is gone (FDB-306), and FDB-301/302 ask for
+// the schedule to be visible "in this step": the next order to pick, and the full
+// schedule with "all orders and their priorities". That step is Process In, so the
+// number now lives there and nowhere else.
+const PRIORITY_VISIBLE_AT = ['process_in'];
 const priorityVisibleAt = stepKey => PRIORITY_VISIBLE_AT.indexOf(stepKey) >= 0;
 
 // ── Ageing ───────────────────────────────────────────────────────────────────
@@ -1844,10 +1967,84 @@ const AgeChip = ({ order }) => {
 // How many pallets in a queue have been sitting past the "few weeks" mark. This
 // is the number the home screen puts in red - the backlog Ben says the old view
 // hid.
-const stepOverdue = (step, site) => stepQueue(step, site).filter(p => ageDays(p.order) >= AGE_WARN).length;
+const stepOverdue = (step, site, stream) => stepQueue(step, site, stream).filter(p => ageDays(p.order) >= AGE_WARN).length;
 // A held pallet is the thing an operator goes looking for, and the new home
-// screen would otherwise bury it one tap down inside QA Review.
-const stepHolds = (step, site) => stepQueue(step, site).filter(p => p.state === 'QA_HOLD').length;
+// screen would otherwise bury it one tap down inside QA Review. A hold or damage
+// flag raised on the floor (FDB-307) counts the same way as a QA hold.
+const stepHolds = (step, site, stream) => stepQueue(step, site, stream).filter(p => p.state === 'QA_HOLD' || isHeld(p)).length;
+
+// ── Single-pick steps (rev3, FDB-301 / FDB-302) ──────────────────────────────
+// "Some steps require a single action for the user to perform (based on schedule
+// or priorities). Other steps have multiple selections, picking any option." For
+// the single-pick kind the screen shows ONE order, the one the schedule says is
+// next, as a full card: how many pallets, what each is doing, where each one is.
+//
+// Orders still to be worked at this step, in the order the schedule says. The
+// first one is "in action" and the rest wait their turn. Ties on priority are
+// normal (everything is released at 50), so the longest waiting breaks them.
+const pickOrders = (step, site, stream) => {
+  const cfg = step.pick;
+  if (!cfg) return [];
+  const seen = new Map();
+  palletsInScope(site, stream).forEach(p => {
+    if (cfg.pickStates.indexOf(p.state) >= 0 && !seen.has(p.order.id)) seen.set(p.order.id, p.order);
+  });
+  // An order Business Central has scheduled comes before one it has not, then the
+  // usual order. Only scheduled orders carry a priority.
+  const isSched = o => orderPallets(o).some(p => cfg.pickStates.indexOf(p.state) >= 0);
+  return [...seen.values()].sort((a, b) =>
+    (isSched(b) - isSched(a)) ||
+    (cfg.orderBy === 'priority'
+      ? (byPriority(a, b) || ageDays(b) - ageDays(a) || a.id.localeCompare(b.id))
+      : (ageDays(b) - ageDays(a) || a.id.localeCompare(b.id))));
+};
+// Every order still on its way through the step, scheduled or not, in schedule
+// order. This is the read-only list behind the second tab.
+const scheduleOrders = (step, site, stream) => {
+  const cfg = step.pick;
+  if (!cfg) return [];
+  const seen = new Map();
+  palletsInScope(site, stream).forEach(p => {
+    if (cfg.scheduleStates.indexOf(p.state) >= 0 && !seen.has(p.order.id)) seen.set(p.order.id, p.order);
+  });
+  // An order Business Central has scheduled comes before one it has not, then the
+  // usual order. Only scheduled orders carry a priority.
+  const isSched = o => orderPallets(o).some(p => cfg.pickStates.indexOf(p.state) >= 0);
+  return [...seen.values()].sort((a, b) =>
+    (isSched(b) - isSched(a)) ||
+    (cfg.orderBy === 'priority'
+      ? (byPriority(a, b) || ageDays(b) - ageDays(a) || a.id.localeCompare(b.id))
+      : (ageDays(b) - ageDays(a) || a.id.localeCompare(b.id))));
+};
+// "Go to rack B or room B and grab the pallets." The zone is the part of the bin
+// name before the dash, so a pallet in "Zone B - Bay 21" sends the operator to
+// Zone B. A pallet with no bin yet has nowhere to point at.
+const zoneOf = bin => { const z = String(bin || '').split(' - ')[0].trim(); return z; };
+const zonesFor = pallets => {
+  const out = [];
+  pallets.forEach(p => { const z = zoneOf(p.bin); if (z && out.indexOf(z) < 0) out.push(z); });
+  return out;
+};
+// What one pallet is doing, in the words of the step it sits on. Used by the full
+// card, where "what status each pallet is" is the point.
+const pickStatus = (p, step) => {
+  const cfg = step.pick;
+  if (isHeld(p)) return { text: holdLabel(p), tone: 'red', work: false };
+  if (cfg.pickStates.indexOf(p.state) >= 0) {
+    return { text: step.key === 'dispatch' ? 'Ready to load' : 'Ready to pick', tone: 'green', work: true };
+  }
+  if (step.key === 'process_in') {
+    if (p.state === 'IN_STORAGE_UNPROCESSED') return { text: 'In storage', tone: 'muted', work: false };
+    if (STEP_OF(p) === 5) return { text: 'In the process bin', tone: 'done', work: false };
+    if (STEP_OF(p) > 5)   return { text: 'Processed out', tone: 'done', work: false };
+  }
+  if (step.key === 'dispatch') {
+    if (p.state === 'SHIPPED')  return { text: 'Dispatched', tone: 'done', work: false };
+    if (p.state === 'QA_HOLD')  return { text: 'QA hold', tone: 'red', work: false };
+    return { text: 'Waiting on QA', tone: 'muted', work: false };
+  }
+  return { text: stateLabel(p.state), tone: 'muted', work: false };
+};
 // ── Side panel ───────────────────────────────────────────────────────────────
 // What the bottom bar used to hold, minus the two entries that did not earn a
 // permanent third of the screen. Opened from the menu button in the header.
@@ -1903,7 +2100,9 @@ const SidePanel = ({ open, onClose, navigate, appData }) => {
 
         <div style={{ flex: 1, overflow: 'auto' }}>
           <Item label="My Profile" onClick={() => go('profile')} />
-          <Item label="Change Site" onClick={() => go('site_select')} />
+          {/* Rev3: site and stream are chosen together on one page, with the
+              account's site picked to start with. This one entry reopens it. */}
+          <Item label="Change Site / Stream" onClick={() => go('stream_select')} />
           {/* Which yard this operator is on, spelt out rather than abbreviated,
               because the drawer has the width the header strip does not. */}
           {site && (
@@ -1919,10 +2118,20 @@ const SidePanel = ({ open, onClose, navigate, appData }) => {
               </div>
             </div>
           )}
+          {appData.workStream && (
+            <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.border}` }}>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 10.5, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6 }}>
+                Working on
+              </div>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text, marginTop: 3 }}>
+                {STREAM_LABEL[appData.workStream] || appData.workStream}
+              </div>
+            </div>
+          )}
         </div>
 
         <div style={{ borderTop: `1px solid ${C.border}` }}>
-          <Item label="Sign Out" danger onClick={() => go('splash', { operator: '', site: null })} />
+          <Item label="Sign Out" danger onClick={() => go('splash', { operator: '', site: null, workStream: null })} />
           <div style={{ padding: '12px 16px', fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted }}>
             SteriScan 1.0.0
           </div>
@@ -1937,7 +2146,7 @@ const SidePanel = ({ open, onClose, navigate, appData }) => {
 // Ben, 2026-09-10: "+ pallet/order/product search is a great addition" and "Keep
 // the search bar that is handy to have." So it survives the rebuild untouched and
 // stays at the top of home, above the flow.
-const SearchBar = ({ query, setQuery, navigate, placeholder = 'Search order, pallet, lot or product…' }) => (
+const SearchBar = ({ query, setQuery, navigate, placeholder = 'Search order, pallet, lot or product…', showScan = true }) => (
   <div style={{
     display: 'flex', alignItems: 'center', gap: 8,
     background: '#fff', border: `1px solid ${C.border}`, borderRadius: 12,
@@ -1968,9 +2177,11 @@ const SearchBar = ({ query, setQuery, navigate, placeholder = 'Search order, pal
         </svg>
       </button>
     )}
-    {/* Identify: "what is this pallet?" - opens the record, changes nothing. */}
-    <button
-      onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null })}
+    {/* Identify: "what is this pallet?" - opens the record, changes nothing.
+        Not drawn on the scan screen itself, where it would open the screen it
+        is already on. */}
+    {showScan && <button
+      onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null, scanIntent: null })}
       title="Scan a pallet label"
       style={{
         background: C.brand, border: 'none', borderRadius: 8,
@@ -1984,7 +2195,7 @@ const SearchBar = ({ query, setQuery, navigate, placeholder = 'Search order, pal
         <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
         <line x1="7" y1="12" x2="17" y2="12"/>
       </svg>
-    </button>
+    </button>}
   </div>
 );
 
@@ -2085,8 +2296,9 @@ const SiteRow = ({ site, onPick, current = false }) => {
 };
 
 const SiteSelectScreen = ({ navigate, appData }) => {
-  // Reachable two ways: after the badge scan, where there is nothing to go back
-  // to, and from home when the operator moves site mid-shift, where there is.
+  // Rev3: IT / admin only. An operator's site comes from their account and is not
+  // theirs to change, so no operator screen links here any more; it is reached from
+  // the Tweaks menu, standing in for the admin who would re-point a scanner.
   const hasSite = !!appData.site;
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
@@ -2100,7 +2312,7 @@ const SiteSelectScreen = ({ navigate, appData }) => {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {SITES.map(site => (
             <SiteRow key={site.code} site={site} current={site.code === appData.site}
-              onPick={code => navigate('dashboard', { site: code })} />
+              onPick={code => navigate('stream_select', { site: code, workStream: null })} />
           ))}
         </div>
         {/* The addresses have to live somewhere, because a driver or a new
@@ -2121,6 +2333,94 @@ const SiteSelectScreen = ({ navigate, appData }) => {
   );
 };
 
+// ── Site and stream picker (rev3, FDB-308) ───────────────────────────────────
+// "After the site selection (or dictated by the users account preference) the
+// sign in screen should also then show the stream selection/type of work. This way
+// sites and streams can share scanners if extra hardware is needed."
+//
+// One page for both choices. Every site the operator can work is listed, with the
+// account's own site picked to start with, and all three streams are listed under
+// it. The rev3 notes say the site "needs to be set at account level as well": that
+// is what the preselection is. The operator can still pick another of their sites
+// here, because they have access to all four; what the notes rule out is a
+// "Change Site" button wandering around the working screens, so there is none.
+//
+// Picking a stream scopes the home counts and every queue to that site and stream,
+// because each stream is its own "black box" with its own schedule. Chamber
+// scheduling is still open pending the Business Central data structure discussion,
+// so this is a view filter and says nothing about how BC separates the schedules.
+const StreamSelectScreen = ({ navigate, appData }) => {
+  const streams   = streamsAtSite(appData.site);
+  const hasStream = !!appData.workStream;
+  // The operator's site is fixed by their account.
+  const pick = ACCOUNT_SITE;
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
+      <StatusBar />
+      <NavBar title={`Hello ${(appData.operator || 'Operator').split(' ')[0]}`}
+        onBack={hasStream ? () => navigate('dashboard') : null} showLogo={true} />
+      <div style={{ flex: 1, overflow: 'auto', padding: '20px 16px' }}>
+        {/* The site comes from the operator's account (rev3 notes). The other sites
+            are listed but cannot be picked; only IT / admins move a scanner. */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 22 }}>
+          {SITES.map(s => {
+            const on = s.code === pick;
+            return (
+              <div key={s.code} aria-disabled={!on} style={{
+                display: 'flex', alignItems: 'center', gap: 12, background: '#fff', borderRadius: 14,
+                border: on ? `1.5px solid ${C.brand}` : `1px solid ${C.border}`,
+                padding: '10px 12px', opacity: on ? 1 : 0.45, cursor: on ? 'default' : 'not-allowed',
+              }}>
+                <div style={{
+                  width: 34, height: 34, borderRadius: 10, flexShrink: 0, background: on ? C.navBg : '#EEF2F7',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: 'Outfit,sans-serif', fontSize: 12.5, fontWeight: 700, color: on ? '#fff' : C.navBg,
+                }}>{s.code}</div>
+                <div style={{ flex: 1, fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text }}>
+                  {s.name}, {s.state}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <SectionTitle title="What are you working on?" />
+        <div style={{ height: 8 }}/>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {streams.map(key => {
+            const n = palletsInScope(pick, key).filter(p => p.state !== 'SHIPPED').length;
+            return (
+              <button key={key} onClick={() => navigate('dashboard', { site: pick, workStream: key })} style={{
+                width: '100%', textAlign: 'left', cursor: 'pointer', background: '#fff', borderRadius: 16,
+                border: appData.workStream === key && appData.site === pick ? `1.5px solid ${C.brand}` : `1px solid ${C.border}`,
+                padding: '15px 16px', display: 'flex', alignItems: 'center', gap: 13,
+              }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 13, flexShrink: 0, background: '#EEF2F7',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: 'Outfit,sans-serif', fontSize: 13.5, fontWeight: 700, color: C.navBg, letterSpacing: 0.3,
+                }}>{STREAM_SHORT[key]}</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text }}>{STREAM_LABEL[key]}</div>
+                  <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2 }}>
+                    {n} pallet{n !== 1 ? 's' : ''} at {(siteByCode(pick) || {}).name}
+                  </div>
+                </div>
+                {appData.workStream === key && appData.site === pick && (
+                  <span style={{ background: '#EEF2FF', color: C.brand, borderRadius: 5, padding: '2px 7px', fontFamily: 'DM Sans,sans-serif', fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4 }}>CURRENT</span>
+                )}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Home Screen: the process flow ────────────────────────────────────────────
 // Top to bottom: search, the shift pin if one is set, the steps in process order,
 // then All Orders as the last tile - "Maybe keep the option for all orders view
@@ -2134,8 +2434,13 @@ const SiteSelectScreen = ({ navigate, appData }) => {
 const DashboardScreen = ({ navigate, appData }) => {
   const [menu, setMenu] = React.useState(false);
   const site = appData.site;
+  // Rev3: the stream chosen at sign-in scopes every count on this screen. With
+  // none chosen (a Tweaks deep link) it falls back to the whole site.
+  const stream = appData.workStream || null;
   const sitePallets = palletsAtSite(site);
   const siteOrders  = ordersAtSite(site);
+  // Scheduling is Business Central's and no longer a card (FDB-306).
+  const homeSteps   = WORK_STEPS.filter(s => !s.hidden);
 
   const openStep = key => navigate('task_queue', { taskStep: key });
 
@@ -2151,8 +2456,11 @@ const DashboardScreen = ({ navigate, appData }) => {
           Drawn as part of the header rather than as a white bar under it: it is
           header information, and as its own strip it belonged to neither the
           header above nor the page below. */}
-      <div onClick={() => navigate('site_select')} style={{
-        flexShrink: 0, cursor: 'pointer', background: C.navBg,
+      {/* Rev3: the site is a label here and not a button, so there is no "Change
+          Site" on the working screens. The pill beside it names the stream and
+          reopens the one page where site and stream are chosen. */}
+      <div style={{
+        flexShrink: 0, background: C.navBg,
         padding: '0 16px 13px', display: 'flex', alignItems: 'center', gap: 8,
       }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="rgba(255,255,255,0.55)" stroke="none" style={{ flexShrink: 0 }}>
@@ -2161,11 +2469,13 @@ const DashboardScreen = ({ navigate, appData }) => {
         <span style={{ flex: 1, minWidth: 0, fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 600, color: 'rgba(255,255,255,0.86)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {siteLabel(site)}
         </span>
-        <span style={{
-          fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700,
-          color: 'rgba(255,255,255,0.9)', flexShrink: 0,
-          background: 'rgba(255,255,255,0.12)', borderRadius: 7, padding: '4px 10px',
-        }}>Change</span>
+        {stream && (
+          <button onClick={() => navigate('stream_select')} style={{
+            fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            color: 'rgba(255,255,255,0.92)', flexShrink: 0, border: 'none',
+            background: 'rgba(255,255,255,0.12)', borderRadius: 7, padding: '4px 10px',
+          }}>{STREAM_LABEL[stream] || stream} ▾</button>
+        )}
       </div>
       <div style={{ flex: 1, overflow: 'auto', padding: '16px 16px 20px' }}>
         {/* No search bar here any more. It lives inside each step queue,
@@ -2203,17 +2513,18 @@ const DashboardScreen = ({ navigate, appData }) => {
               shadow. A hairline box around every tile is what made nine equal
               rectangles read as a menu from a decade ago. */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10 }}>
-            {WORK_STEPS.map((step, i) => {
+            {homeSteps.map((step, i) => {
               // Seven steps in a three-wide grid leaves the last one alone in a
               // row with two holes beside it. The last card takes the whole row
               // instead, laid out along it. Derived from the count, so an eighth
               // step added to WORK_STEPS closes the row and this goes back to
-              // being an ordinary card with no code change.
-              const lastRow = WORK_STEPS.length % 3 || 3;
-              const wide = (i === WORK_STEPS.length - 1) && lastRow === 1;
-              const queue   = stepQueue(step, site);
-              const overdue = stepOverdue(step, site);
-              const holds   = stepHolds(step, site);
+              // being an ordinary card with no code change. With Scheduling off
+              // the home there are six cards, a clean 3 x 2, so no card is wide.
+              const lastRow = homeSteps.length % 3 || 3;
+              const wide = (i === homeSteps.length - 1) && lastRow === 1;
+              const queue   = stepQueue(step, site, stream);
+              const overdue = stepOverdue(step, site, stream);
+              const holds   = stepHolds(step, site, stream);
               const empty   = queue.length === 0;
               const flagged = overdue > 0 || holds > 0;
               const flagText = holds ? `${holds} on hold` : overdue ? `${overdue} over ${AGE_WARN}d` : '';
@@ -2362,7 +2673,7 @@ const DashboardScreen = ({ navigate, appData }) => {
               "what is this pallet and where is it up to". The one dark surface
               on the screen, because it is the one thing an operator reaches for
               from anywhere. */}
-          <button onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null })}
+          <button onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null, scanIntent: null })}
             style={{
               width: '100%', marginTop: 12, cursor: 'pointer',
               background: C.navBg, border: 'none', borderRadius: 16,
@@ -2379,14 +2690,49 @@ const DashboardScreen = ({ navigate, appData }) => {
               </svg>
             </div>
             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              {/* Rev3, FDB-399: "Scan a pallet" became "Pallet/Order Search"
+                  with the subtext "Scan or search any active order." The
+                  screen behind it now does both. */}
               <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: '#fff' }}>
-                Scan a pallet
+                Pallet/Order Search
               </div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: 'rgba(255,255,255,0.66)', marginTop: 2 }}>
-                Any pallet, any step
+                Scan or search any active order.
               </div>
             </div>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6"/>
+            </svg>
+          </button>
+
+          {/* Rev3, FDB-307: a quick action reachable from home. "From the home
+              screen it should request that the label is scanned and then starts
+              the Incident/On hold process/form for the scanned pallet(s)." The
+              scan screen reads scanIntent and hands the pallet to the form. */}
+          <button onClick={() => navigate('scan_pallet', { selectedOrder: null, selectedPallet: null, scanIntent: 'incident' })}
+            style={{
+              width: '100%', marginTop: 10, cursor: 'pointer',
+              background: '#fff', border: '1.5px solid #FDE68A', borderRadius: 16,
+              padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+            <div style={{
+              width: 34, height: 34, borderRadius: 11, flexShrink: 0, background: '#FEF3C7',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#92400E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+              </svg>
+            </div>
+            <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 14.5, fontWeight: 700, color: C.text }}>
+                On Hold / Damage
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 2 }}>
+                Scan a label to report a problem
+              </div>
+            </div>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 18 15 12 9 6"/>
             </svg>
           </button>
@@ -2395,44 +2741,48 @@ const DashboardScreen = ({ navigate, appData }) => {
   );
 };
 
-// One lot inside a step queue.
+// One order inside a step queue.
 //
-// A queue is a list of LOTS, not a list of pallets. A lot is trucked in, staged
-// and run as a unit, one of the orders in this seed carries 20 pallets, and a
-// real day can hold dozens of lots at one step. Printing every pallet as a card
-// would rebuild the exact wall Ben objected to, one level down: 30 lots at 20
-// pallets is 600 cards.
+// Rev3, FDB-302: "We operate at the order level for all tasks. The toggle view
+// with pallet breakdown per order should be removed from the initial list view of
+// the steps ... Orders should just be a clickable card that opens the detail view."
 //
-// It also does not match the job. At the dock the operator is not browsing a
-// list to choose a pallet - the pallet is already in front of them and they
-// scan it. What the list has to answer is "which lots am I working and how much
-// is left on each", and the pallets are the detail behind that.
+// So a queue is a list of ORDER cards and nothing more. The card says how much of
+// the order is still pending at this step and how much is complete, and a tap opens
+// the order's whole-lot view (Order Detail), which is where the pallets live. The
+// expandable pallet rows, "Show all N pallets" and "Open the whole lot" that used to
+// hang off this card are gone, and so are the constants that sized them.
 //
-// So a lot is one row, and its pallets unfold underneath on tap. A small lot
-// opens itself, because collapsing three rows hides nothing and costs a tap.
-const LOT_AUTO_OPEN = 3;   // pallets at this step, at or below which the lot opens itself
-const LOT_PREVIEW   = 6;   // pallets drawn before "show all"
-const QueueLotGroup = ({ group, step, showPriority, forceOpen = false, onOpenOrder, onOpenPallet }) => {
+// A search that hits a pallet still has to explain why the card is in the list, so
+// the matching pallet ids are named on the card instead of the card being expanded.
+const MATCH_PREVIEW = 2;
+const QueueOrderCard = ({ group, step, showPriority, query, onOpenOrder }) => {
   const here  = group.pallets.length;
   const total = orderPallets(group.order).length;
-  // Open while a search is running: the rows left in the list ARE the hits, and
-  // hiding them behind a collapsed lot would make the search look broken.
-  const [open, setOpen] = React.useState(here <= LOT_AUTO_OPEN);
-  const shownOpen = open || forceOpen;
-  const [showAll, setShowAll] = React.useState(false);
-  const shown = showAll ? group.pallets : group.pallets.slice(0, LOT_PREVIEW);
-  // How much of the lot is already past this step. At process in and process out
-  // the whole lot has to clear before the status moves, so "6 of 20 done" is the
+  // How much of the order is already past this step. At process in and process out
+  // the whole lot has to clear before the status moves, so "6 of 20 complete" is the
   // number the operator is actually working towards.
-  const done  = total - here;
+  // "Complete" means past this step. It used to be everything not sitting here,
+  // which counted a pallet still on the dock as done at Check In; with the word
+  // "complete" (FDB-399) that would be plainly wrong.
+  const stepNo = Math.max(...step.states.map(s => STATE_TO_STEP[s]));
+  const done  = orderPallets(group.order).filter(p => STEP_OF(p) > stepNo).length;
+  const held  = group.pallets.filter(isHeld).length;
+  // Arrival drafts and printed-but-unattached labels belong to the two steps that
+  // create them, so they only show there.
+  const drafts = step && step.key === 'arrival'  ? draftsFor(group.order)    : 0;
+  const labels = step && step.key === 'putaway'  ? labelsWaiting(group.order) : 0;
+  const hits   = query ? group.pallets.filter(p => p.id.toLowerCase().indexOf(query) >= 0) : [];
+  const Flag = ({ tone, children }) => (
+    <span style={{
+      background: tone === 'red' ? '#FEE2E2' : '#FEF3C7', color: tone === 'red' ? '#991B1B' : '#92400E',
+      borderRadius: 6, padding: '2px 7px', fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700,
+    }}>{children}</span>
+  );
 
   return (
-    <Card style={{ padding: 0, overflow: 'hidden' }}>
-      {/* ── The lot row. This is the unit of the queue. ─────────────────── */}
-      <div onClick={() => setOpen(!open)} style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '12px 14px', cursor: 'pointer',
-      }}>
+    <Card style={{ padding: 0, overflow: 'hidden', cursor: 'pointer' }} onClick={() => onOpenOrder(group.order)}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 14px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text }}>
@@ -2442,7 +2792,6 @@ const QueueLotGroup = ({ group, step, showPriority, forceOpen = false, onOpenOrd
                 forms at arrival and run in different chambers, so an operator
                 working a mixed queue needs to know before they open it. */}
             <StreamBadge stream={group.order.stream} />
-            {/* The only place in the app a priority number appears. */}
             {showPriority && <PriorityChip order={group.order} />}
           </div>
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -2451,14 +2800,16 @@ const QueueLotGroup = ({ group, step, showPriority, forceOpen = false, onOpenOrd
                 the arrival screen asks for, so it is named next to the customer. */}
             {subStreamLabel(group.order) ? ` · ${subStreamLabel(group.order)}` : ''}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 7, flexWrap: 'wrap' }}>
+            {/* Rev3 wording, FDB-399: "x pallets here" is now "x pallets pending"
+                and "x of y done" is now "x of y complete". */}
             <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 700, color: C.text }}>
-              {here} pallet{here !== 1 ? 's' : ''} here
+              {here} pallet{here !== 1 ? 's' : ''} pending
             </span>
             {/* Only worth saying when part of the lot has already moved on. */}
             {done > 0 && (
               <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>
-                {done} of {total} done
+                {done} of {total} complete
               </span>
             )}
           </div>
@@ -2469,41 +2820,247 @@ const QueueLotGroup = ({ group, step, showPriority, forceOpen = false, onOpenOrd
               <div style={{ width: `${(done / total) * 100}%`, height: '100%', borderRadius: 2, background: step ? step.colour : C.brand }}/>
             </div>
           )}
+          {(held > 0 || drafts > 0 || labels > 0) && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {held > 0   && <Flag tone="red">{held} on hold</Flag>}
+              {drafts > 0 && <Flag tone="amber">{drafts} draft{drafts !== 1 ? 's' : ''} saved</Flag>}
+              {labels > 0 && <Flag tone="amber">{labels} label{labels !== 1 ? 's' : ''} to attach</Flag>}
+            </div>
+          )}
+          {hits.length > 0 && (
+            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.brand, fontWeight: 600, marginTop: 7 }}>
+              Matches {hits.slice(0, MATCH_PREVIEW).map(p => p.id).join(', ')}
+              {hits.length > MATCH_PREVIEW ? ` and ${hits.length - MATCH_PREVIEW} more` : ''}
+            </div>
+          )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8, flexShrink: 0 }}>
           <AgeChip order={group.order} />
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
-            style={{ transform: shownOpen ? 'rotate(90deg)' : 'none', transition: 'transform 160ms' }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6"/>
           </svg>
         </div>
       </div>
+    </Card>
+  );
+};
 
-      {/* ── The pallets, only once asked for. ───────────────────────────── */}
-      {shownOpen && (
-        <div style={{ borderTop: `1px solid ${C.border}`, background: '#F8FAFC', padding: '10px 12px' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {shown.map(p => <PalletRowCard key={p.id} pallet={p} onOpen={onOpenPallet} />)}
+// ── Stream filter and tabs (rev3, FDB-308 / FDB-301) ─────────────────────────
+// "Add stream filtering for the process in/scheduled step in the view." Chips, one
+// per stream the site runs. The picker opens on the stream chosen at sign-in, and a
+// single-stream site has nothing to filter, so it draws nothing. The single-pick
+// steps cannot offer "All": each stream has its own next order, so mixing them
+// would put two "in action" orders on one screen.
+const StreamFilter = ({ streams, value, onChange, allowAll }) => {
+  if (streams.length < 2) return null;
+  const opts = allowAll ? ['all', ...streams] : streams;
+  return (
+    <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+      {opts.map(k => {
+        const on = value === k;
+        return (
+          <button key={k} onClick={() => onChange(k)} style={{
+            cursor: 'pointer', borderRadius: 999, padding: '7px 14px',
+            fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, fontWeight: 700,
+            background: on ? C.brand : '#fff', color: on ? '#fff' : C.text,
+            border: on ? `1.5px solid ${C.brand}` : `1.5px solid ${C.border}`,
+          }}>{k === 'all' ? 'All streams' : STREAM_LABEL[k]}</button>
+        );
+      })}
+    </div>
+  );
+};
+
+const PickTabs = ({ tabs, value, onChange }) => (
+  <div style={{ display: 'flex', background: '#E7EBF1', borderRadius: 12, padding: 3, marginBottom: 12 }}>
+    {tabs.map((t, i) => (
+      <button key={t} onClick={() => onChange(i)} style={{
+        flex: 1, cursor: 'pointer', border: 'none', borderRadius: 10, padding: '9px 6px',
+        fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700,
+        background: value === i ? '#fff' : 'transparent', color: value === i ? C.text : C.muted,
+        boxShadow: value === i ? '0 1px 2px rgba(16,24,40,0.10)' : 'none',
+      }}>{t}</button>
+    ))}
+  </div>
+);
+
+// ── Single-pick: the one order the schedule says is next ─────────────────────
+// Rev3, FDB-301 / FDB-302. "An operator should be able to open this step and see
+// the clear instruction to go to rack B or room B and grab the pallets. This full
+// view display should be the standard for these single pick types." And what the
+// card shows: "how many pallets, what status each pallet is, and where each pallet
+// is in the warehouse."
+//
+// Any pallet inside the order can be picked at the operator's discretion, so every
+// ready pallet is a row they can open; the order is not walked pallet by pallet.
+// Once the order is fully scanned it leaves this step by itself (its pallets are no
+// longer in pickStates) and the next order takes the card, which is step 5 of the
+// notes: "the scanner now shows the operator the next order to pick".
+const PICK_ROWS = 8;
+const SinglePickNext = ({ step, order, stream, navigate }) => {
+  const cfg = step.pick;
+  const [showAll, setShowAll] = React.useState(false);
+  if (!order) {
+    return (
+      <div style={{ textAlign: 'center', padding: '34px 16px', color: C.muted, fontFamily: 'DM Sans,sans-serif', fontSize: 13, lineHeight: 1.5 }}>
+        {step.key === 'process_in'
+          ? `Nothing is scheduled to process in${stream ? ` for ${STREAM_LABEL[stream]}` : ''} right now. Orders still waiting on the Business Central schedule are under Full schedule.`
+          : `Nothing is released and waiting for dispatch${stream ? ` for ${STREAM_LABEL[stream]}` : ''} right now.`}
+      </div>
+    );
+  }
+  const all     = orderPallets(order);
+  const rows    = all.map(p => ({ p, s: pickStatus(p, step) }))
+                     .sort((a, b) => (b.s.work - a.s.work) || a.p.id.localeCompare(b.p.id));
+  const ready   = rows.filter(r => r.s.work).map(r => r.p);
+  const shown   = showAll ? rows : rows.slice(0, PICK_ROWS);
+  const gate    = lotGate(order, cfg.doneStep);
+  const zones   = zonesFor(ready);
+  const verbing = cfg.instruction === 'load' ? 'load' : 'pick';
+  const tone = {
+    green: { bg: '#DCFCE7', fg: '#15803D' }, red: { bg: '#FEE2E2', fg: '#991B1B' },
+    done:  { bg: '#E0E7FF', fg: '#3730A3' }, muted: { bg: '#E2E8F0', fg: '#475569' },
+  };
+  const openPallet = p => {
+    const s = pickStatus(p, step);
+    const go = s.work ? stepOpens(step, p, order) : { screen: 'pallet_detail' };
+    navigate(go.screen, {
+      selectedOrder: order, selectedPallet: p, palletId: p.id,
+      palletBack: 'task_queue', orderBack: 'task_queue', queueBack: true,
+      binPhase: 'pre_treatment', binMoveOnly: false,
+      ...(go.extras || {}),
+    });
+  };
+
+  return (
+    <>
+      <Card style={{ padding: 0, overflow: 'hidden', border: `1.5px solid ${step.colour}` }}>
+        <div style={{ background: `${step.colour}14`, padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ width: 8, height: 8, borderRadius: 4, background: step.colour }}/>
+          <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: step.colour, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+            Next up · in action
+          </span>
+        </div>
+
+        <div style={{ padding: '14px 14px 4px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+            <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text }}>{lotText(order)}</span>
+            <StreamBadge stream={order.stream} />
+            {priorityVisibleAt(step.key) && <PriorityChip order={order} current />}
           </div>
-          {here > LOT_PREVIEW && (
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.muted, marginTop: 3 }}>
+            {order.customer}{subStreamLabel(order) ? ` · ${subStreamLabel(order)}` : ''}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: 12 }}>
+            <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, color: C.muted }}>{cfg.doneLabel}</span>
+            <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: C.text }}>{gate.done} of {gate.total}</span>
+          </div>
+          <div style={{ height: 5, borderRadius: 3, background: C.border, overflow: 'hidden', marginTop: 6 }}>
+            <div style={{ width: `${(gate.done / Math.max(1, gate.total)) * 100}%`, height: '100%', borderRadius: 3, background: gate.complete ? C.green : step.colour }}/>
+          </div>
+        </div>
+
+        {/* The instruction. This is the line the card exists to carry. */}
+        <div style={{
+          margin: '12px 14px 4px', background: '#FFFBEB', border: '1px solid #FDE68A',
+          borderRadius: 12, padding: '11px 13px', display: 'flex', gap: 10, alignItems: 'flex-start',
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#92400E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
+            <path d="M12 2a7 7 0 0 0-7 7c0 5.1 7 13 7 13s7-7.9 7-13a7 7 0 0 0-7-7z"/><circle cx="12" cy="9" r="2.5"/>
+          </svg>
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, color: '#78350F', lineHeight: 1.5 }}>
+            {ready.length === 0
+              ? <>No pallet on this order is {step.key === 'dispatch' ? 'ready to load' : 'ready to pick'} at the moment.</>
+              : <>
+                  <strong>{zones.length ? `Go to ${zones.join(' and ')}` : 'Find the pallets'}</strong>
+                  {` and ${verbing} the ${ready.length} pallet${ready.length !== 1 ? 's' : ''} marked ${step.key === 'dispatch' ? 'Ready to load' : 'Ready to pick'}. Any pallet on this order can go first.`}
+                </>}
+          </div>
+        </div>
+
+        <div style={{ padding: '10px 12px 4px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {shown.map(({ p, s }) => (
+              <div key={p.id} onClick={() => openPallet(p)} style={{
+                background: s.work ? '#fff' : '#F8FAFC', border: `1px solid ${s.work ? C.border : '#EEF1F5'}`,
+                borderRadius: 12, padding: '10px 12px', cursor: 'pointer', opacity: s.work ? 1 : 0.85,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 14, fontWeight: 700, color: C.text }}>{p.id}</span>
+                  <span style={{
+                    background: tone[s.tone].bg, color: tone[s.tone].fg, borderRadius: 6, padding: '3px 8px',
+                    fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, letterSpacing: 0.3, whiteSpace: 'nowrap',
+                  }}>{s.text}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 5, fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted }}>
+                  <span>{binLabel(p)}</span>
+                  <span>{p.weight} kg · {palletCartons(p)} cartons</span>
+                </div>
+              </div>
+            ))}
+          </div>
+          {rows.length > PICK_ROWS && (
             <button onClick={() => setShowAll(!showAll)} style={{
               width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 10,
               border: `1px solid ${C.border}`, background: '#fff', cursor: 'pointer',
               fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.brand,
-            }}>
-              {showAll ? 'Show fewer' : `Show all ${here} pallets →`}
-            </button>
+            }}>{showAll ? 'Show fewer' : `Show all ${rows.length} pallets →`}</button>
           )}
-          <button onClick={() => onOpenOrder(group.order)} style={{
-            width: '100%', marginTop: 8, padding: '8px 0', borderRadius: 10,
-            border: 'none', background: 'transparent', cursor: 'pointer',
-            fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.muted,
-          }}>
-            Open the whole lot →
-          </button>
+        </div>
+
+        <button onClick={() => navigate('order_detail', { selectedOrder: order, orderBack: 'task_queue' })} style={{
+          width: '100%', padding: '11px 0 13px', border: 'none', background: 'transparent', cursor: 'pointer',
+          fontFamily: 'DM Sans,sans-serif', fontSize: 12, fontWeight: 700, color: C.muted,
+        }}>Open the whole lot →</button>
+      </Card>
+    </>
+  );
+};
+
+// ── Single-pick: the full schedule, read only ────────────────────────────────
+// "Having an option to see the full schedule (as in see all orders and their
+// priorities in this step) is also helpful but secondary to the main task ...
+// However, no actions for scanning in this view." So a row opens the order to look
+// at it and never a scan.
+const SingleSchedule = ({ step, orders, current, navigate }) => {
+  const cfg = step.pick;
+  return (
+    <>
+      {!orders.length && (
+        <div style={{ textAlign: 'center', padding: '28px 16px', color: C.muted, fontFamily: 'DM Sans,sans-serif', fontSize: 13 }}>
+          Nothing on the schedule.
         </div>
       )}
-    </Card>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {orders.map(o => {
+          const ps        = orderPallets(o);
+          const scheduled = ps.some(p => cfg.pickStates.indexOf(p.state) >= 0);
+          const gate      = lotGate(o, cfg.doneStep);
+          const isCurrent = current && current.id === o.id;
+          const status    = isCurrent ? { t: 'In action', bg: '#FEE2E2', fg: '#991B1B' }
+                          : scheduled ? { t: step.key === 'dispatch' ? 'Ready' : 'Scheduled', bg: '#DCFCE7', fg: '#15803D' }
+                          : null;
+          return (
+            <Card key={o.id} style={{ padding: '12px 14px', cursor: 'pointer' }}
+              onClick={() => navigate('order_detail', { selectedOrder: o, orderBack: 'task_queue' })}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                {priorityVisibleAt(step.key) && (scheduled || isCurrent) && <PriorityChip order={o} current={isCurrent} />}
+                <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text }}>{lotText(o)}</span>
+                <StreamBadge stream={o.stream} />
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 3 }}>{o.customer}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
+                {status ? <span style={{ background: status.bg, color: status.fg, borderRadius: 6, padding: '3px 8px', fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700 }}>{status.t}</span> : <span/>}
+                <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>
+                  {gate.done} of {gate.total} {step.key === 'dispatch' ? 'dispatched' : 'processed in'}
+                </span>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+    </>
   );
 };
 
@@ -2512,21 +3069,27 @@ const QueueLotGroup = ({ group, step, showPriority, forceOpen = false, onOpenOrd
 // of one step, which is the whole point of the 10 Sep note: "employees will
 // struggle to focus on a specific task".
 //
-// Rows are grouped by LOT, not listed flat. A lot is trucked in, staged and run
-// as a unit, and one lot on this demo carries 20 pallets - a flat list of 19
-// pallets in Process Out is the same wall of cards Ben objected to, one level
-// down.
+// Two kinds of step (rev3, FDB-301). A pick-any step (Arrival, Check In, Process
+// Out, QA Review) is a list of order cards; any of them can be opened. A single-pick
+// step (Process In, Dispatch) opens on the one order the schedule says is next, with
+// the whole schedule one tab away.
+//
+// Rows are grouped by ORDER, never listed per pallet: a lot is trucked in, staged
+// and run as a unit, and one lot on this demo carries 20 pallets.
 const TaskQueueScreen = ({ navigate, appData }) => {
-  const step  = stepByKey(appData.taskStep);
-  const isBC  = step.owner === 'bc';
+  const step   = stepByKey(appData.taskStep);
+  const isBC   = step.owner === 'bc';
+  const single = !!step.pick;
   const showPriority = step.showPriority && priorityVisibleAt(step.key);
-  // Scheduling is worked down the schedule, everything else oldest first so a
-  // pallet booked in weeks ago cannot sink under this morning's arrivals.
-  const [sort, setSort] = React.useState(showPriority ? 'priority' : 'oldest');
+  const streams = streamsAtSite(appData.site);
+  // The stream is the one chosen at sign-in (FDB-308). No filter on the queue;
+  // changing stream goes back through Change Site / Stream.
+  const stream = appData.workStream || (single ? streams[0] : null);
+  const [tab, setTab] = React.useState(0);
   const [query, setQuery] = React.useState('');
   const q = query.trim().toLowerCase();
 
-  const all   = stepQueue(step, appData.site);
+  const all   = stepQueue(step, appData.site, stream);
   const queue = q ? all.filter(p => palletMatches(p, q)) : all;
   // Group to lots, then order the GROUPS - sorting pallets and grouping after
   // would scatter one lot down the list.
@@ -2536,9 +3099,13 @@ const TaskQueueScreen = ({ navigate, appData }) => {
     if (!g) { g = { order: p.order, pallets: [] }; groups.push(g); }
     g.pallets.push(p);
   });
-  groups.sort((a, b) =>
-    sort === 'priority' ? (byPriority(a.order, b.order) || ageDays(b.order) - ageDays(a.order))
-                        : (ageDays(b.order) - ageDays(a.order) || a.order.id.localeCompare(b.order.id)));
+  // Everything is oldest first so a pallet booked in weeks ago cannot sink under
+  // this morning's arrivals. The schedule order lives on the single-pick steps.
+  groups.sort((a, b) => ageDays(b.order) - ageDays(a.order) || a.order.id.localeCompare(b.order.id));
+
+  const next      = single ? pickOrders(step, appData.site, stream) : [];
+  const scheduled = single ? scheduleOrders(step, appData.site, stream) : [];
+  const schedShown = q ? scheduled.filter(o => orderMatches(o, q)) : scheduled;
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg }}>
@@ -2578,55 +3145,56 @@ const TaskQueueScreen = ({ navigate, appData }) => {
           </div>
         )}
 
-        {/* Narrows this step, not the yard. The placeholder says so, because a
-            search box that silently searched only part of the data would be a
-            trap. */}
-        <SearchBar query={query} setQuery={setQuery} navigate={navigate}
-          placeholder={`Search ${step.label.toLowerCase()}: lot, pallet or product…`} />
+        {single && <PickTabs tabs={step.pick.tabs} value={tab} onChange={setTab} />}
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: C.text }}>
-            {groups.length} lot{groups.length !== 1 ? 's' : ''} · {queue.length} pallet{queue.length !== 1 ? 's' : ''}
-            {q && all.length !== queue.length ? ` of ${all.length}` : ''}
-          </div>
-          <select value={sort} onChange={e => setSort(e.target.value)} style={{
-            padding: '6px 10px', borderRadius: 8, border: `1px solid ${C.border}`,
-            fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.text, background: '#fff', cursor: 'pointer',
-          }}>
-            <option value="oldest">Sort: Longest waiting</option>
-            {/* The schedule order only means something where the number is shown,
-                so it is offered on the scheduling step and nowhere else. */}
-            {showPriority && <option value="priority">Sort: Schedule</option>}
-          </select>
-        </div>
-
-        {!groups.length && (
-          <div style={{ textAlign: 'center', padding: '34px 16px', color: C.muted, fontFamily: 'DM Sans,sans-serif', fontSize: 13 }}>
-            {q
-              ? `Nothing on ${step.label} matches "${query.trim()}".`
-              : `Nothing is waiting on ${step.label.toLowerCase()} right now.`}
-          </div>
+        {single && tab === 0 && (
+          <SinglePickNext step={step} order={next[0] || null} stream={stream} navigate={navigate} />
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {groups.map(g => (
-            <QueueLotGroup key={g.order.id} group={g} step={step} showPriority={showPriority} forceOpen={!!q}
-              onOpenOrder={o => navigate('order_detail', { selectedOrder: o, orderBack: 'task_queue' })}
-              onOpenPallet={pp => {
-                const go = stepOpens(step, pp, g.order);
-                navigate(go.screen, {
-                  selectedOrder: g.order, selectedPallet: pp, palletId: pp.id,
-                  palletBack: 'task_queue', orderBack: 'task_queue',
-                  // Straight into a step's screen, so the back arrow on it has
-                  // to come back here rather than to wherever that screen
-                  // usually sits in the flow.
-                  queueBack: true,
-                  binPhase: 'pre_treatment', binMoveOnly: false,
-                  ...(go.extras || {}),
-                });
-              }} />
-          ))}
-        </div>
+        {single && tab === 1 && (
+          <>
+            <SearchBar query={query} setQuery={setQuery} navigate={navigate}
+              placeholder={`Search ${step.label.toLowerCase()}: lot, pallet or product…`} />
+            <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: C.text, marginBottom: 10 }}>
+              {schedShown.length} order{schedShown.length !== 1 ? 's' : ''}
+              {q && scheduled.length !== schedShown.length ? ` of ${scheduled.length}` : ''}
+            </div>
+            <SingleSchedule step={step} orders={schedShown} current={next[0] || null} navigate={navigate} />
+          </>
+        )}
+
+        {!single && (
+          <>
+            {/* Narrows this step, not the yard. The placeholder says so, because a
+                search box that silently searched only part of the data would be a
+                trap. */}
+            <SearchBar query={query} setQuery={setQuery} navigate={navigate}
+              placeholder={`Search ${step.label.toLowerCase()}: lot, pallet or product…`} />
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: C.text }}>
+                {groups.length} order{groups.length !== 1 ? 's' : ''} · {queue.length} pallet{queue.length !== 1 ? 's' : ''}
+                {q && all.length !== queue.length ? ` of ${all.length}` : ''}
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted }}>Longest waiting first</div>
+            </div>
+
+            {!groups.length && (
+              <div style={{ textAlign: 'center', padding: '34px 16px', color: C.muted, fontFamily: 'DM Sans,sans-serif', fontSize: 13 }}>
+                {q
+                  ? `Nothing on ${step.label} matches "${query.trim()}".`
+                  : `Nothing is waiting on ${step.label.toLowerCase()} right now.`}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {groups.map(g => (
+                <QueueOrderCard key={g.order.id} group={g} step={step} showPriority={showPriority} query={q}
+                  onOpenOrder={o => navigate('order_detail', { selectedOrder: o, orderBack: 'task_queue' })} />
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -2915,7 +3483,18 @@ const PalletRowCard = ({ pallet, onOpen }) => {
           </svg>
           <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 14.5, fontWeight: 700, color: C.text }}>{pallet.id}</span>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          {/* Flags that belong to the pallet and not to its state: a hold or
+              damage report from the floor (FDB-307), an arrival draft waiting on
+              QA to create a product (FDB-303), a label printed but not attached
+              yet (FDB-305). */}
+          {isHeld(pallet) && <Badge state="QA_HOLD" label={holdLabel(pallet)} />}
+          {draftFor(pallet) && pallet.state === 'ARRIVED' && (
+            <span style={{ background: '#FEF3C7', color: '#92400E', borderRadius: 6, padding: '3px 8px', fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>DRAFT</span>
+          )}
+          {LABELS_WAITING.has(pallet.id) && pallet.state === 'RECEIVED' && (
+            <span style={{ background: '#FEF3C7', color: '#92400E', borderRadius: 6, padding: '3px 8px', fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, letterSpacing: 0.4 }}>LABEL TO ATTACH</span>
+          )}
           <Badge state={pallet.state} />
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="9 18 15 12 9 6"/>
@@ -2988,9 +3567,14 @@ const palletAction = (pallet, order) => {
   // "View QA Review" promised a review that did not exist yet. The screen behind
   // is the same either way; only the promise changes.
   const qaLabel = lotAllProcessedOut(order) ? 'View QA Review →' : 'Waiting on the Lot →';
+  // A pallet the floor has put on hold or flagged as damaged goes nowhere until
+  // the flag is cleared (rev3, FDB-307). The pallet screen says why.
+  if (isHeld(pallet)) return null;
   switch (pallet.state) {
     case 'ARRIVED':                return { label: 'Start Arrival →',      screen: 'receiving_form' };
     case 'RECEIVED':               return { label: 'Check In and Store →', screen: 'scan_bin' };
+    // Scheduling is Business Central's and does not gate the scan: a stored pallet
+    // can go to Process In without waiting on it.
     case 'IN_STORAGE_UNPROCESSED': return { label: 'Process In →',         screen: 'process_in' };
     case 'STAGED':                 return { label: 'Process In →',         screen: 'process_in' };
     // Held until every pallet on the lot is in - see lotAllProcessedIn.
@@ -3113,11 +3697,9 @@ const OrderDetailScreen = ({ navigate, appData }) => {
           <InfoRow label="Received" value={order.date + ', 2026'} />
         </Card>
 
-        <BCStepsNote />
-
         {/* The heart of the fix: the pallets are listed individually, each with
             its own state, because each one is a separate workflow instance. */}
-        <SectionTitle title={`Pallets (${pallets.length})`} subtitle="Each pallet runs its own workflow - tap to open" />
+        <SectionTitle title={`Pallets (${pallets.length})`} />
         <div style={{ marginBottom: 6 }}>
           {palletsByState(order).map(g => (
             <PalletGroupSection key={g.state} group={g} onOpen={openPallet} />
@@ -3127,8 +3709,18 @@ const OrderDetailScreen = ({ navigate, appData }) => {
 
       {/* No order-level "next step" button any more - actions belong to a
           pallet, so the order screen only routes you into scanning one. */}
-      <div style={{ background: '#fff', borderTop: `1px solid ${C.border}`, padding: '12px 16px' }}>
-        <Btn label="Scan Pallet →" onClick={() => navigate('scan_pallet', { selectedOrder: order, selectedPallet: null })} color="orange" large />
+      <div style={{ background: '#fff', borderTop: `1px solid ${C.border}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Quick action (rev3, FDB-307), reachable from the order as well as the
+            pallet: a problem is often with the whole lot, not one pallet. */}
+        {pallets.some(canRaiseIncident) && (
+          <button onClick={() => navigate('incident', { selectedOrder: order, selectedPallet: null, incidentBack: 'order_detail' })}
+            style={{
+              width: '100%', height: 42, borderRadius: 12, cursor: 'pointer',
+              background: '#FFFBEB', border: '1.5px solid #FDE68A',
+              fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: '#92400E',
+            }}>On Hold / Damage</button>
+        )}
+        <Btn label="Scan Pallet →" onClick={() => navigate('scan_pallet', { selectedOrder: order, selectedPallet: null, scanIntent: null })} color="orange" large />
       </div>
     </div>
   );
@@ -3184,6 +3776,12 @@ const PalletDetailScreen = ({ navigate, appData }) => {
   // Read-only footers. Each is a state where there is nothing to scan, so
   // the screen has to say WHY there is no button rather than just show none.
   const notice =
+    // A hold or damage flag raised on the floor (rev3, FDB-307). It wins over
+    // every other reason, because nothing else matters while the pallet is held.
+    isHeld(pallet)
+      ? { kind: 'held', bg: '#FEE2E2', bd: '#FECACA', fg: '#991B1B', stroke: '#991B1B',
+          text: `${pallet.hold.kind === 'damage' ? 'Marked damaged' : 'On hold'}: ${pallet.hold.reason}. This pallet does not move until the flag is cleared.`,
+          icon: <><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></> } :
     // The pallet is treated and ready, but the lot is not. Naming how many are
     // still out is the difference between a rule and a dead button.
     (pallet.state === 'IN_TREATMENT' && !lotAllProcessedIn(order))
@@ -3210,6 +3808,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
             <Badge state={pallet.state} />
+            {isHeld(pallet) && <Badge state="QA_HOLD" label={holdLabel(pallet)} />}
             <StreamBadge stream={order.stream} />
           </div>
         </div>
@@ -3363,7 +3962,25 @@ const PalletDetailScreen = ({ navigate, appData }) => {
           </button>
         )}
 
-        <BCStepsNote />
+        {/* Quick action (rev3, FDB-307): "Right now first idea is to add an On
+            Hold action which should be available at any step of the process ...
+            accessible from any search/view of the order." Up until dispatch. */}
+        {canRaiseIncident(pallet) && !isHeld(pallet) && (
+          <button onClick={() => navigate('incident', {
+            selectedOrder: order, selectedPallet: pallet, palletId: pallet.id, incidentBack: 'pallet_detail',
+          })} style={{
+            width: '100%', marginBottom: 14, padding: '12px', borderRadius: 12,
+            background: '#FFFBEB', border: '1.5px solid #FDE68A', cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: '#92400E',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            On Hold / Damage
+          </button>
+        )}
 
         {/* Item-level data capture hangs off these, not off the pallet. */}
         <SectionTitle title={`Product lines on this pallet (${pallet.items.length})`} />
@@ -3397,8 +4014,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
             and hid the one thing they could go and do. One sibling is enough. */}
         {!actionIsWork && lotPending.length > 0 && (
           <>
-            <SectionTitle title={`Rest of this lot (${lotPending.length})`}
-              subtitle={`${lotOf(order)} - still waiting on you, tap to open`} />
+            <SectionTitle title={`Rest of this lot (${lotPending.length})`} />
             <div style={{ marginBottom: 6 }}>
               {groupByState(lotPending).map(g => (
                 <PalletGroupSection key={g.state} group={g} onOpen={p => navigate('pallet_detail', {
@@ -3440,6 +4056,10 @@ const PalletDetailScreen = ({ navigate, appData }) => {
                   {notice.text}
                 </span>
               </div>
+            )}
+            {notice && notice.kind === 'held' && (
+              <Btn label="Clear hold" color="blue" outline small
+                onClick={() => { setPalletHold(pallet, null); navigate('pallet_detail', { selectedOrder: order, selectedPallet: pallet, palletId: pallet.id }); }} />
             )}
             <button onClick={() => navigate('dashboard')} style={{
               width: '100%', height: 42, borderRadius: 12, cursor: 'pointer',
@@ -3486,6 +4106,19 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   const expected      = appData.selectedPallet || null;
   const expectedOrder = expected ? null : (order || null);
   const [mismatch, setMismatch] = React.useState(null);
+  // Rev3, FDB-399 / FDB-307. With no pallet or order in hand this screen is the
+  // home "Pallet/Order Search": scan a label, or search for the order. When the
+  // operator came from the On Hold / Damage action (scanIntent), the same screen
+  // finds the pallet and hands it to the incident form instead of the pallet view.
+  const intent    = appData.scanIntent || null;
+  const discovery = !expected && !expectedOrder;
+  const [query, setQuery] = React.useState('');
+  const sq = query.trim().toLowerCase();
+  const activeOrders = ordersAtSite(appData.site).filter(o => orderState(o) !== 'SHIPPED');
+  const orderHits  = discovery && sq ? activeOrders.filter(o => orderMatches(o, sq)).slice(0, 5) : [];
+  const palletHits = discovery && sq
+    ? palletsAtSite(appData.site).filter(p => p.state !== 'SHIPPED' && p.id.toLowerCase().indexOf(sq) >= 0).slice(0, 5)
+    : [];
 
   // Scan tab with no order context: land on a pallet there is work on. The run
   // starts at the dock, so an arriving pallet is the useful default.
@@ -3511,11 +4144,25 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   // mode skipped straight past the very view a scan is supposed to produce.
   const proceed = (pallet) => {
     const parent = orderOfPallet(pallet.id) || order || DEFAULT_PALLET_ORDER;
+    if (intent === 'incident') {
+      // Straight into the incident form for the scanned pallet. A shipped pallet
+      // is off site, so there is nothing to hold.
+      if (!canRaiseIncident(pallet)) {
+        navigate('fail', { failMessage: `${pallet.id} has already been dispatched, so it cannot be put on hold.`, retryScreen: 'scan_pallet', scanIntent: 'incident' });
+        return;
+      }
+      navigate('incident', {
+        selectedOrder: parent, selectedPallet: pallet, palletId: pallet.id,
+        stream: parent.stream, scanIntent: null, incidentBack: 'dashboard',
+      });
+      return;
+    }
     navigate('pallet_detail', {
       selectedOrder: parent,
       selectedPallet: pallet,
       palletId: pallet.id,
       stream: parent.stream,
+      scanIntent: null,
     });
   };
 
@@ -3589,8 +4236,38 @@ const ScanPalletScreen = ({ navigate, appData }) => {
     );
   }
 
+  // A search hit stands in for a scan. It goes the same place a scan of that pallet
+  // would, which is the incident form or the pallet view depending on intent.
+  const pickPallet = p => proceed(p);
+  const pickOrder = o => {
+    if (intent === 'incident') {
+      navigate('incident', {
+        selectedOrder: o, selectedPallet: null, stream: o.stream,
+        scanIntent: null, incidentBack: 'dashboard',
+      });
+    } else {
+      // orderBack is home, not this screen: coming back here with an order still
+      // selected would turn the search into "scan a pallet on that order".
+      navigate('order_detail', { selectedOrder: o, orderBack: 'dashboard', scanIntent: null });
+    }
+  };
+  const Hit = ({ title, sub, onClick }) => (
+    <Card style={{ padding: '11px 14px', cursor: 'pointer' }} onClick={onClick}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 14, fontWeight: 700, color: C.text }}>{title}</div>
+          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sub}</div>
+        </div>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </div>
+    </Card>
+  );
+
   return (
-    <PageWrapper title="Scan Pallet" onBack={() => navigate('dashboard')}
+    <PageWrapper title={discovery ? (intent === 'incident' ? 'On Hold / Damage' : 'Pallet/Order Search') : 'Scan Pallet'}
+      onBack={() => navigate('dashboard', { scanIntent: null })}
       bottomBar={(expected || expectedOrder) ? (
         <button onClick={() => handleScan(decoy)} style={{
           width: '100%', background: 'none', border: 'none', color: C.muted,
@@ -3601,19 +4278,167 @@ const ScanPalletScreen = ({ navigate, appData }) => {
       ) : null}>
       <div style={{ padding: '28px 20px 0' }}>
         <SectionTitle
-          title="Scan Pallet Label"
-          subtitle="The label tells you what this pallet is and where it is up to" />
+          title={discovery ? (intent === 'incident' ? 'Scan the pallet label' : 'Scan or search') : 'Scan Pallet Label'}
+          subtitle={discovery
+            ? (intent === 'incident' ? 'Scan the label of the pallet with the problem, or find it by search' : 'Scan or search any active order.')
+            : 'The label tells you what this pallet is and where it is up to'} />
 
         {expected ? (
           <Alert type="warning" message={`Expecting ${expected.id} - scan that pallet's label to confirm`} />
         ) : expectedOrder ? (
           <Alert type="warning" message={`Scan any pallet on ${expectedOrder.id} - ${orderPallets(expectedOrder).length} pallet(s)`} />
         ) : (
-          <Alert type="info" message="Scan any pallet in the warehouse" />
+          <SearchBar query={query} setQuery={setQuery} navigate={navigate} showScan={false}
+            placeholder="Search order, pallet, lot or product…" />
+        )}
+
+        {discovery && sq && (
+          <div style={{ marginBottom: 14 }}>
+            {orderHits.length === 0 && palletHits.length === 0 && (
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, color: C.muted, padding: '6px 2px' }}>
+                No active order or pallet matches "{query.trim()}".
+              </div>
+            )}
+            {orderHits.length > 0 && (
+              <>
+                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, margin: '2px 0 8px' }}>Orders</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 12 }}>
+                  {orderHits.map(o => (
+                    <Hit key={o.id} title={lotText(o)} sub={`${o.customer} · ${orderPallets(o).length} pallets`} onClick={() => pickOrder(o)} />
+                  ))}
+                </div>
+              </>
+            )}
+            {palletHits.length > 0 && (
+              <>
+                <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, textTransform: 'uppercase', letterSpacing: 0.6, margin: '2px 0 8px' }}>Pallets</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {palletHits.map(p => (
+                    <Hit key={p.id} title={p.id} sub={`${p.order.id} · ${stateLabel(p.state)}`} onClick={() => pickPallet(p)} />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
 
         <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
           <ScanView onSimulate={() => handleScan(null)} label="Scan Pallet Label" />
+        </div>
+      </div>
+    </PageWrapper>
+  );
+};
+
+// ═════════════════════════════════════════════════════════════════════════════
+// ON HOLD / DAMAGE - the quick action (rev3, FDB-307)
+// ═════════════════════════════════════════════════════════════════════════════
+// "Up until the final dispatch (or maybe QA review step), orders should be able to
+// be put on hold or marked as damaged." "Right now first idea is to add an On Hold
+// action which should be available at any step of the process. If anyone needs to
+// mark the pallet on hold this should be accessible from any search/view of the
+// order." The notes mark it nice to have, so this is the first idea and nothing
+// more: a flag and a short form.
+//
+// It is reached from a pallet, from an order, and from home (which asks for the
+// label first). Nothing on the form changes the pallet's workflow state. The flag
+// stops the pallet being actioned and counts as a hold on the home tile; clearing
+// it from the pallet screen puts the pallet back exactly where it was.
+//
+// Scope is a real choice: a problem is as often with the whole lot as with one
+// pallet, and the notes say "pallet(s)".
+const HOLD_REASONS = {
+  hold:   ['Awaiting customer instruction', 'Documentation query', 'Temperature concern', 'Product query', 'Other'],
+  damage: ['Crushed cartons', 'Torn or loose wrap', 'Pallet damaged', 'Water or moisture damage', 'Other'],
+};
+const IncidentScreen = ({ navigate, appData }) => {
+  const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
+  const pallet = appData.selectedPallet || null;       // null: raised from the order
+  const back   = appData.incidentBack || 'pallet_detail';
+  const eligible = orderPallets(order).filter(canRaiseIncident);
+  const [kind, setKind]     = React.useState('hold');
+  const [reason, setReason] = React.useState(HOLD_REASONS.hold[0]);
+  const [notes, setNotes]   = React.useState('');
+  const [photo, setPhoto]   = React.useState('');
+  const [scope, setScope]   = React.useState(pallet ? 'pallet' : 'lot');
+  const targets = scope === 'pallet' && pallet ? [pallet] : eligible;
+  const setKindAndReason = k => { setKind(k); setReason(HOLD_REASONS[k][0]); };
+
+  const submit = () => {
+    const hold = { kind, reason, notes: notes.trim(), photo, by: appData.operator || 'Operator', at: stamp(order, '09:15') };
+    targets.forEach(p => setPalletHold(p, hold));
+    navigate('success', {
+      successTitle: kind === 'damage' ? 'MARKED DAMAGED' : 'PUT ON HOLD',
+      successMessage: `${targets.length} pallet${targets.length !== 1 ? 's' : ''} on ${order.id}\n${reason}\nThe pallet${targets.length !== 1 ? 's do' : ' does'} not move until the flag is cleared.`,
+    });
+  };
+
+  const Seg = ({ value, current, onSet, label }) => (
+    <button onClick={() => onSet(value)} style={{
+      flex: 1, cursor: 'pointer', borderRadius: 12, padding: '12px 8px',
+      fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700,
+      background: current === value ? (value === 'damage' ? '#FEE2E2' : '#FEF3C7') : '#fff',
+      color: current === value ? (value === 'damage' ? '#991B1B' : '#92400E') : C.text,
+      border: current === value ? `1.5px solid ${value === 'damage' ? '#FCA5A5' : '#FCD34D'}` : `1.5px solid ${C.border}`,
+    }}>{label}</button>
+  );
+  const Lbl = ({ children }) => (
+    <label style={{ display: 'block', fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.6px' }}>{children}</label>
+  );
+
+  return (
+    <PageWrapper title="On Hold / Damage" onBack={() => navigate(back, { selectedOrder: order, selectedPallet: pallet })}
+      bottomBar={<Btn label={kind === 'damage' ? 'Mark as Damaged' : 'Put On Hold'} color={kind === 'damage' ? 'red' : 'orange'}
+        onClick={submit} disabled={!targets.length} />}>
+      <div style={{ padding: '20px 16px 12px' }}>
+        <Card style={{ padding: '12px 14px', marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 15, fontWeight: 700, color: C.text }}>{lotText(order)}</div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: C.muted, marginTop: 2 }}>
+                {pallet ? pallet.id : `${eligible.length} pallet${eligible.length !== 1 ? 's' : ''}`} · {order.customer}
+              </div>
+            </div>
+            <StreamBadge stream={order.stream} />
+          </div>
+        </Card>
+
+        <Lbl>What is wrong</Lbl>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+          <Seg value="hold"   current={kind} onSet={setKindAndReason} label="On hold" />
+          <Seg value="damage" current={kind} onSet={setKindAndReason} label="Damaged" />
+        </div>
+
+        <Select label="Reason" value={reason} onChange={e => setReason(e.target.value)}
+          options={HOLD_REASONS[kind].map(r => ({ value: r, label: r }))} />
+
+        {/* Which pallets. "pallet(s)" in the notes: one, or the whole lot. */}
+        <Lbl>Applies to</Lbl>
+        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
+          {pallet && <Seg value="pallet" current={scope} onSet={setScope} label="This pallet" />}
+          <Seg value="lot" current={scope} onSet={setScope} label={`Whole lot (${eligible.length})`} />
+        </div>
+
+        <Lbl>Notes (optional)</Lbl>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="What did you see?"
+          style={{
+            width: '100%', borderRadius: 10, padding: '10px 12px', resize: 'none',
+            border: '1.5px solid #D1CEC9', background: '#fff', boxSizing: 'border-box',
+            fontFamily: 'DM Sans,sans-serif', fontSize: 14, color: C.text, marginBottom: 14,
+          }}/>
+
+        <Lbl>{kind === 'damage' ? 'Photo of the damage' : 'Photo (optional)'}</Lbl>
+        <div onClick={() => setPhoto(photo ? '' : 'INCIDENT-001.jpg')} style={{
+          borderRadius: 10, cursor: 'pointer', padding: '14px 12px', marginBottom: 6,
+          border: `1.5px dashed ${photo ? '#86EFAC' : '#93C5FD'}`, background: photo ? '#F0FDF4' : '#F8FAFC',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={photo ? '#15803D' : C.brand} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>
+          </svg>
+          <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: photo ? '#15803D' : C.brand }}>
+            {photo || 'Take photo'}
+          </span>
         </div>
       </div>
     </PageWrapper>
@@ -3640,6 +4465,8 @@ const ScanBinScreen = ({ navigate, appData }) => {
     } else {
       const bin = binForState('IN_STORAGE_UNPROCESSED', 4);
       advancePallet(pallet, 'IN_STORAGE_UNPROCESSED', bin);
+      // The label is on the pallet by the time its bin is scanned.
+      LABELS_WAITING.delete(pallet.id);
       navigate('pallet_detail', { binLocation: bin });
     }
   };
@@ -3931,21 +4758,26 @@ const bcProductsFor = customer => BC_PRODUCTS[customer] || BC_PRODUCTS_FALLBACK;
 // Range, Biosecurity Direction and Container Number live in column D, as things
 // the scanner shows. An earlier pass had them as editable arrival fields, which
 // was simply the wrong column.
+//
+// Rev3, FDB-304 splits the list by WHO the data belongs to. `level: 'order'` is
+// the truck's or the lot's and is captured once: "Some fields such as Truck
+// Temperature, should be order level detail. Other fields, such as Photo of labels
+// should [be] pallet/product level." Everything without a level is the pallet's.
+// Charges came off this list: they are no longer a free-text field but a set of
+// switches, see ARRIVAL_CHARGES.
 const ARRIVAL_FIELDS = {
   fresh_domestic: [
-    { label: 'Truck Temperature',                             isNew: true },
+    { label: 'Truck Temperature',                             isNew: true, level: 'order' },
     { label: 'Pulp Temperature',                              isNew: true },
     { label: 'Product Line - Photo of Carton Label',          isNew: true, photo: true },
-    { label: 'Charges (overheight re-stack, labels, transport)', isNew: true },
     { label: 'ICA-55 Date Code',                              isNew: true },
     { label: 'Grower Details',                                prefill: 'grower' },
     { label: 'Storage Temperature',                           prefill: 'storageTemp' },
   ],
   fresh_export: [
-    { label: 'Truck Temperature',                             isNew: true },
+    { label: 'Truck Temperature',                             isNew: true, level: 'order' },
     { label: 'Pulp Temperature',                              isNew: true },
     { label: 'Product Line - Photo of Carton Label',          isNew: true, photo: true },
-    { label: 'Charges (overheight re-stack, labels, transport)', isNew: true },
     { label: 'Storage Temperature',                           prefill: 'storageTemp' },
     { label: 'Grower Details',                                prefill: 'grower' },
   ],
@@ -3953,18 +4785,36 @@ const ARRIVAL_FIELDS = {
   medical:     [],
   beehives:    [],
 };
+// Rev3, FDB-304: "Charges should be a boolean input field (per charge). Toggle
+// switch default off. Charges should be pallet based at this step in the workflow."
+// The four the notes name. Transport is not one of them: "Transport should be
+// carried through from the portal submission and not shown here."
+const ARRIVAL_CHARGES = [
+  { key: 'net',        label: 'Net, if required' },
+  { key: 'overheight', label: 'Over height' },
+  { key: 'overweight', label: 'Over weight' },
+  { key: 'labels',     label: 'Labels required' },
+];
+// Charges sit where they sat before, on the two fresh produce forms. The other
+// forms have no arrival fields in the workbook, and a charge switch is not a reason
+// to invent some.
+const CHARGE_FORMS = ['fresh_domestic', 'fresh_export'];
 
 const ReceivingFormScreen = ({ navigate, appData }) => {
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallet = palletOf(appData, order);
   const req    = SAMPLE_REQUEST;
-  const [step, setStep] = React.useState(1);
+  // Rev3, FDB-303: a pallet whose receiving was blocked on a product line comes
+  // back with everything the operator had captured, and opens on the step that
+  // blocked it.
+  const draft = draftFor(pallet);
+  const [step, setStep] = React.useState(draft ? 3 : 1);
   const TOTAL = 3;
 
   // Corrections to what the customer submitted, keyed by field label. Held on
   // the side rather than written over the order, so the row can show both the
   // corrected value and what the customer originally sent.
-  const [corrections, setCorrections] = React.useState({});
+  const [corrections, setCorrections] = React.useState(draft ? draft.corrections : {});
   // Step 1 is read only. The workbook's arrival form does not include
   // correcting the customer's order-level fields, so the toggle that used to
   // turn these rows into inputs is gone and this stays false.
@@ -4005,7 +4855,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
   // case: the customer described the goods, but not to Steritech's detail, so
   // somebody has to decide which reference it really is.
   const catalogue = bcProductsFor(order.customer);
-  const [lines, setLines] = React.useState(() => pallet.items.map((it, i) => {
+  const [lines, setLines] = React.useState(() => draft ? draft.lines : pallet.items.map((it, i) => {
     const hit = catalogue.find(p => p.code === it.code);
     return {
       key:       `${pallet.id}-${i}`,
@@ -4030,16 +4880,26 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
   const blocked = unmatched > 0 || pendingQA > 0;
 
   // ── Damage capture ────────────────────────────────────────────────────────
-  const [damage, setDamage] = React.useState([]);
-  const addDamage = () => setDamage(d => [...d, { id: Date.now() + Math.random(), name: `DMG-${String(d.length + 1).padStart(3, '0')}.jpg`, size: '1.4 MB' }]);
-  const removeDamage = id => setDamage(d => d.filter(x => x.id !== id));
 
   // On-arrival capture. Only what the workbook asks for: the two pictures in
   // column E. There is no operator notes field and no general file upload here -
   // neither appears anywhere in the sheet or in Ben's email. The customer's
   // Comments are column D and stay read only.
-  const [arrival,    setArrival]    = React.useState({});
+  const [arrival,    setArrival]    = React.useState(draft ? draft.arrival : {});
   const setAF = (k, v) => setArrival(s => ({ ...s, [k]: v }));
+  // Charges are switches, one per charge, all off until the operator turns one on
+  // (FDB-304), and they belong to this pallet.
+  const [charges, setCharges] = React.useState(draft ? draft.charges : {});
+  const setCharge = (k, v) => setCharges(c => ({ ...c, [k]: v }));
+  // Order-level fields live in ORDER_ARRIVAL so the next pallet on the lot finds
+  // them already filled. "Data capture should have order level details first or
+  // copied through each pallet dialogue windows to ensure its consistent."
+  const [orderLevel, setOrderLevelState] = React.useState(() => ({ ...(ORDER_ARRIVAL[order.id] || {}) }));
+  const carriedOver = React.useRef(Object.values(ORDER_ARRIVAL[order.id] || {}).some(v => !!v));
+  const setOL = (k, v) => {
+    ORDER_ARRIVAL[order.id] = { ...(ORDER_ARRIVAL[order.id] || {}), [k]: v };
+    setOrderLevelState(ORDER_ARRIVAL[order.id]);
+  };
   // Fields that are not highlighted blue already exist on the order, so they
   // come back from the submission rather than starting empty.
   const prefillFor = f => f.prefill === 'grower'      ? (tmpl.commodities[0] || {}).grower || ''
@@ -4065,6 +4925,8 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
     // receive the pallet, we book it in, it prints the labels." Submitting this
     // form IS the book-in, so the state moves here and the labels follow.
     advancePallet(pallet, 'RECEIVED', '');
+    // Received, so there is no draft left to come back to.
+    delete ARRIVAL_DRAFTS[pallet.id];
     navigate('print_labels', {
       selectedOrder: { ...order, stream: order.stream || 'irradiation' },
       selectedPallet: pallet,
@@ -4077,16 +4939,34 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
       corrections,
     });
   };
+  // Rev3, FDB-303: "Is there a way to return to the next product/order without
+  // losing the progress here?" Receiving stays blocked, which is right for the
+  // label logic, but what was captured is kept against the pallet and the operator
+  // is sent back to the Arrival list to start the next pallet. The pallet stays
+  // Arrived; it is the draft that remembers the work.
+  const saveDraft = () => {
+    ARRIVAL_DRAFTS[pallet.id] = { lines, arrival, charges, corrections };
+    navigate('task_queue', { taskStep: 'arrival', queueBack: false });
+  };
   const back = () => {
     if (step > 1) setStep(step - 1);
     else navigate(appData.queueBack ? 'task_queue' : 'pallet_detail');
   };
 
-  const STEP_TITLES = ['Order details', 'Product lines', 'Arrival checks'];
-  // The read-only banner belongs to the customer-submitted steps. Steps 3 and 4
-  // are the operator's own work, so it would contradict them.
-  const readOnlyStep = step === 1;
+  // Rev3, FDB-303: "Instead of the current flow, the steps should be flipped
+  // around. 1. First the arrival details are captured. 2. Then product
+  // information is selected. This way the arrival details are captured and stored
+  // earlier and then workflow is paused at a logical step." The customer's order
+  // is still checked first; what changed is that Arrival checks now come BEFORE
+  // Product lines, so a blocked product line can no longer lose them.
+  const STEP_TITLES = ['Order details', 'Arrival checks', 'Product lines'];
   const arrivalFields = ARRIVAL_FIELDS[order.subStream] || [];
+  const orderFields   = arrivalFields.filter(f => f.level === 'order');
+  const palletFields  = arrivalFields.filter(f => f.level !== 'order');
+  const showCharges   = CHARGE_FORMS.indexOf(order.subStream) >= 0;
+  // Transport comes through from the portal submission and is not shown at
+  // arrival (FDB-304).
+  const orderViewFields = viewFields(order).filter(f => f.label !== 'Transport');
 
   return (
     <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: C.bg, position: 'relative' }}>
@@ -4107,38 +4987,6 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
           <PalletChip id={appData.palletId || DEFAULT_PALLET_ID} />
         </div>
 
-        {/* Read-only banner - applies to customer-submitted sections */}
-        {readOnlyStep && (
-        <div style={{
-          background: '#EEF2FF', border: `1px solid #C7D2FE`, borderRadius: 12,
-          padding: 12, marginBottom: 14,
-        }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-            <div style={{
-              width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-              background: '#fff', border: `1px solid #C7D2FE`,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={C.brand} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-              </svg>
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: '#312E81', marginBottom: 2 }}>
-                Submitted by customer
-              </div>
-              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12, color: '#4F46E5', lineHeight: 1.4 }}>
-                Check this against what actually turned up. What the customer
-                submitted is the record; the product lines and the arrival
-                checks are what you capture.
-              </div>
-            </div>
-          </div>
-
-        </div>
-        )}
-
-
         {/* ── STEP 1: column D, the order-selected view ─────────────────────
             Exactly the rows the workbook lists and nothing else. Contact name,
             mobile, email, ETA, order id, lot number, pallet spaces and form name
@@ -4147,7 +4995,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
             address came off the old PDF form rather than this flow. */}
         {step === 1 && (
           <>
-            <SectionTitle title="Order" subtitle="Selected on the scanner" />
+            <SectionTitle title="Order" />
             <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
               {/* Correctable: these are the customer's words and can be wrong. */}
               <EditRow label="Customer Name" value={order.customer}
@@ -4172,11 +5020,11 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 onChange={v => correct('Comments', v)}/>
             </Card>
 
-            {viewFields(order).length > 0 && (
+            {orderViewFields.length > 0 && (
               <>
                 <SectionTitle title={subStreamLabel(order)} />
                 <Card style={{ padding: '14px 16px', marginBottom: 14 }}>
-                  {viewFields(order).map(f => (
+                  {orderViewFields.map(f => (
                     <EditRow key={f.label} label={f.label} value={f.value}
                       corrected={corrections[f.label]} editing={editing}
                       onChange={v => correct(f.label, v)}/>
@@ -4191,8 +5039,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 internal reference yet. The code is assigned at step 2, when the
                 operator matches the line. Printing PRD-2201 at this step would
                 make the bottleneck look already solved. */}
-            <SectionTitle title="Products (line items)"
-              subtitle={`As submitted, on ${pallet.id}, pallet ${palletNo} of ${allPallets.length}`} />
+            <SectionTitle title="Products (line items)" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {pallet.items.map((it, i) => (
                 <Card key={i} style={{ padding: '12px 14px' }}>
@@ -4213,8 +5060,149 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
           </>
         )}
 
-        {/* ── STEP 2: column E, product line matching ───────────────────── */}
+        {/* ── STEP 2: arrival checks ─────────────────────────────────────────
+            Rev3, FDB-303: this used to be step 3. The arrival checks now come
+            BEFORE the product lines, so a product line QA still has to create can
+            no longer take what the operator captured down with it. */}
         {step === 2 && (
+          <>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
+            }}>
+              <div style={{ flex: 1, height: 1, background: C.border }}/>
+              <div style={{
+                fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.orange,
+                textTransform: 'uppercase', letterSpacing: 0.8,
+                background: '#FFF7ED', border: `1px solid #FED7AA`, borderRadius: 999,
+                padding: '4px 10px',
+              }}>Your turn · on-arrival capture</div>
+              <div style={{ flex: 1, height: 1, background: C.border }}/>
+            </div>
+
+            {/* Column E of the workbook, for this order's form only. Blue cells
+                are tagged NEW FIELD; the rest already exist on the order and so
+                arrive pre-filled for the operator to confirm. Rev3 splits them by
+                who the data belongs to: the lot's, entered once, then the pallet's. */}
+            {arrivalFields.length ? (
+              <>
+                {orderFields.length > 0 && (
+                  <>
+                    <SectionTitle title="Order level" />
+                    <Card style={{ padding: 16, marginBottom: 14 }}>
+                      {orderFields.map(f => (
+                        <div key={f.label}>
+                          <label style={{
+                            display: 'block', fontFamily: 'DM Sans,sans-serif', fontSize: 11,
+                            fontWeight: 700, color: C.muted, marginBottom: 5,
+                            textTransform: 'uppercase', letterSpacing: '0.6px',
+                          }}>{f.label}</label>
+                          <input value={orderLevel[f.label] || ''}
+                            onChange={e => setOL(f.label, e.target.value)}
+                            placeholder="Capture on arrival"
+                            style={{
+                              width: '100%', height: 44, borderRadius: 10, padding: '0 12px',
+                              border: `1.5px solid #93C5FD`, background: '#fff',
+                              fontFamily: 'DM Sans,sans-serif', fontSize: 15, color: C.text,
+                              outline: 'none', boxSizing: 'border-box',
+                            }}/>
+                          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted, marginTop: 4 }}>
+                            {carriedOver.current
+                              ? 'Carried over from the first pallet on this lot. Change it here if it is wrong.'
+                              : 'The same for every pallet on this lot, so you only enter it once.'}
+                          </div>
+                        </div>
+                      ))}
+                    </Card>
+                  </>
+                )}
+                <SectionTitle title="Pallet checks" />
+                <Card style={{ padding: 16, marginBottom: 14 }}>
+                    {palletFields.map(f => (
+                      <div key={f.label} style={{ marginBottom: 14 }}>
+                        <label style={{
+                          display: 'block', fontFamily: 'DM Sans,sans-serif', fontSize: 11,
+                          fontWeight: 700, color: C.muted, marginBottom: 5,
+                          textTransform: 'uppercase', letterSpacing: '0.6px',
+                        }}>
+                          {f.label}
+                        </label>
+                        {f.photo ? (
+                          <div onClick={() => setAF(f.label, arrival[f.label] ? '' : 'CARTON-LABEL-001.jpg')} style={{
+                            borderRadius: 10, cursor: 'pointer', padding: '14px 12px',
+                            border: `1.5px dashed ${arrival[f.label] ? '#86EFAC' : '#93C5FD'}`,
+                            background: arrival[f.label] ? '#F0FDF4' : '#F8FAFC',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                          }}>
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={arrival[f.label] ? '#15803D' : C.brand} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                              <circle cx="12" cy="13" r="4"/>
+                            </svg>
+                            <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: arrival[f.label] ? '#15803D' : C.brand }}>
+                              {arrival[f.label] || 'Take photo'}
+                            </span>
+                          </div>
+                        ) : (
+                          <input
+                            value={arrival[f.label] !== undefined ? arrival[f.label] : prefillFor(f)}
+                            onChange={e => setAF(f.label, e.target.value)}
+                            placeholder={f.isNew ? 'Capture on arrival' : ''}
+                            style={{
+                              width: '100%', height: 44, borderRadius: 10, padding: '0 12px',
+                              border: `1.5px solid ${f.isNew ? '#93C5FD' : '#D1CEC9'}`,
+                              background: '#fff', fontFamily: 'DM Sans,sans-serif', fontSize: 15,
+                              color: C.text, outline: 'none', boxSizing: 'border-box',
+                            }}/>
+                        )}
+                        {!f.isNew && (
+                          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted, marginTop: 4 }}>
+                            Submitted by the customer. Confirm or correct it.
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                </Card>
+
+                {/* Rev3, FDB-304: one switch per charge, default off, on the pallet. */}
+                {showCharges && (
+                  <>
+                    <SectionTitle title="Charges" />
+                    <Card style={{ padding: '2px 16px', marginBottom: 14 }}>
+                      {ARRIVAL_CHARGES.map((c, i) => (
+                        <div key={c.key} style={{
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 0',
+                          borderBottom: i < ARRIVAL_CHARGES.length - 1 ? `1px solid ${C.border}` : 'none',
+                        }}>
+                          <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 600, color: C.text }}>{c.label}</span>
+                          <button role="switch" aria-checked={!!charges[c.key]} aria-label={c.label}
+                            onClick={() => setCharge(c.key, !charges[c.key])} style={{
+                              width: 48, height: 28, borderRadius: 14, border: 'none', cursor: 'pointer', flexShrink: 0,
+                              background: charges[c.key] ? C.green : '#CBD5E1', position: 'relative', transition: 'background 150ms',
+                            }}>
+                            <span style={{
+                              position: 'absolute', top: 3, left: charges[c.key] ? 23 : 3, width: 22, height: 22,
+                              borderRadius: 11, background: '#fff', transition: 'left 150ms', boxShadow: '0 1px 2px rgba(0,0,0,0.25)',
+                            }}/>
+                          </button>
+                        </div>
+                      ))}
+                    </Card>
+                  </>
+                )}
+              </>
+            ) : order.subStream === 'beehives' ? (
+              <Alert type="warning"
+                message="Steritech has not defined the Beehives arrival fields yet. The row exists in their workbook but is empty." />
+            ) : (
+              <Alert type="info"
+                message={`${subStreamLabel(order) || 'This form'} has no extra arrival fields. Only the product lines are captured here.`} />
+            )}
+          </>
+        )}
+
+        {/* ── STEP 3: product lines ──────────────────────────────────────────
+            Rev3, FDB-303: was step 2. Last on purpose, so that where receiving is
+            blocked it is blocked here, with the arrival checks already captured. */}
+        {step === 3 && (
           <>
             {/* The step header already says Product lines, so this is just the
                 counter. */}
@@ -4287,16 +5275,6 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                         </div>
                       )}
 
-                      {l.status === 'unmatched' && (
-                        <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, lineHeight: 1.45, marginTop: -6, marginBottom: 12 }}>
-                          {/* The workbook's own words: Create New is "to be completed on
-                              BC by QA". This app records the request and nothing else -
-                              it never creates a product reference itself. */}
-                          Create new does not create anything here. It records the request; QA
-                          creates the product in Business Central.
-                        </div>
-                      )}
-
                       <label style={{ display: 'block', fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.muted, marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.6px' }}>
                         Cartons on this pallet
                       </label>
@@ -4313,172 +5291,36 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 );
               })}
             </div>
-
-          
-            <SectionTitle title="Damaged pallet or cartons" subtitle="Photograph anything that arrived damaged" />
-            <div onClick={addDamage} style={{
-              borderRadius: 12, cursor: 'pointer', marginBottom: 10,
-              border: `1.5px dashed #CBD5E1`, background: '#F8FAFC',
-              display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8,
-              padding: '24px 16px', textAlign: 'center',
-            }}>
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                <circle cx="12" cy="13" r="4"/>
-              </svg>
-              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 14 }}>
-                <span style={{ color: C.brand, fontWeight: 700 }}>Take photo</span>
-                <span style={{ color: C.muted }}> of damage</span>
-              </div>
-              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted }}>Optional - leave empty if nothing is damaged</div>
-            </div>
-
-            {damage.length > 0 && (
-              <Card style={{ padding: 0, marginBottom: 14, overflow: 'hidden' }}>
-                {damage.map((f, i) => (
-                  <div key={f.id} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
-                    borderBottom: i < damage.length - 1 ? `1px solid ${C.border}` : 'none',
-                  }}>
-                    <div style={{ width: 32, height: 32, borderRadius: 8, flexShrink: 0, background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                      </svg>
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 600, color: C.text }}>{f.name}</div>
-                      <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted }}>{f.size}</div>
-                    </div>
-                    <button onClick={() => removeDamage(f.id)} style={{
-                      background: 'none', border: 'none', cursor: 'pointer', padding: 6, color: C.muted,
-                      display: 'flex', alignItems: 'center',
-                    }} aria-label="Remove">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
-                        <path d="M18 6 6 18M6 6l12 12"/>
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </Card>
-            )}
-          </>
-        )}
-
-        {/* ── STEP 3: column E, operator capture ─────────────────────────── */}
-        {step === 3 && (
-          <>
-            {/* The blocking rule, stated where it bites. */}
-            {blocked && (
-              <div style={{
-                display: 'flex', alignItems: 'flex-start', gap: 11, marginBottom: 14,
-                background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 12, padding: '12px 14px',
-              }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={C.red} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
-                </svg>
-                <div>
-                  <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13, fontWeight: 700, color: '#B91C1C' }}>
-                    Receiving is blocked
-                  </div>
-                  <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.text, marginTop: 3, lineHeight: 1.5 }}>
-                    {unmatched > 0 && `${unmatched} product line${unmatched !== 1 ? 's' : ''} still unmatched. `}
-                    {pendingQA > 0 && `${pendingQA} new product${pendingQA !== 1 ? 's' : ''} waiting on QA to create ${pendingQA !== 1 ? 'them' : 'it'} in Business Central. `}
-                    Go back to step 2, Product lines.
-                  </div>
-                </div>
-              </div>
-            )}
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
-            }}>
-              <div style={{ flex: 1, height: 1, background: C.border }}/>
-              <div style={{
-                fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: C.orange,
-                textTransform: 'uppercase', letterSpacing: 0.8,
-                background: '#FFF7ED', border: `1px solid #FED7AA`, borderRadius: 999,
-                padding: '4px 10px',
-              }}>Your turn · on-arrival capture</div>
-              <div style={{ flex: 1, height: 1, background: C.border }}/>
-            </div>
-
-            {/* Column E of the workbook, for this order's form only. Blue cells
-                are tagged NEW FIELD; the rest already exist on the order and so
-                arrive pre-filled for the operator to confirm. */}
-            <SectionTitle title={subStreamLabel(order) ? `${subStreamLabel(order)} fields` : 'Stream fields'}
-              subtitle={arrivalFields.length ? 'Captured at arrival' : undefined} />
-            {arrivalFields.length ? (
-              <Card style={{ padding: 16, marginBottom: 14 }}>
-                {arrivalFields.map(f => (
-                  <div key={f.label} style={{ marginBottom: 14 }}>
-                    <label style={{
-                      display: 'block', fontFamily: 'DM Sans,sans-serif', fontSize: 11,
-                      fontWeight: 700, color: C.muted, marginBottom: 5,
-                      textTransform: 'uppercase', letterSpacing: '0.6px',
-                    }}>
-                      {f.label}
-                    </label>
-                    {f.photo ? (
-                      <div onClick={() => setAF(f.label, arrival[f.label] ? '' : 'CARTON-LABEL-001.jpg')} style={{
-                        borderRadius: 10, cursor: 'pointer', padding: '14px 12px',
-                        border: `1.5px dashed ${arrival[f.label] ? '#86EFAC' : '#93C5FD'}`,
-                        background: arrival[f.label] ? '#F0FDF4' : '#F8FAFC',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-                      }}>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={arrival[f.label] ? '#15803D' : C.brand} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                          <circle cx="12" cy="13" r="4"/>
-                        </svg>
-                        <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: arrival[f.label] ? '#15803D' : C.brand }}>
-                          {arrival[f.label] || 'Take photo'}
-                        </span>
-                      </div>
-                    ) : (
-                      <input
-                        value={arrival[f.label] !== undefined ? arrival[f.label] : prefillFor(f)}
-                        onChange={e => setAF(f.label, e.target.value)}
-                        placeholder={f.isNew ? 'Capture on arrival' : ''}
-                        style={{
-                          width: '100%', height: 44, borderRadius: 10, padding: '0 12px',
-                          border: `1.5px solid ${f.isNew ? '#93C5FD' : '#D1CEC9'}`,
-                          background: '#fff', fontFamily: 'DM Sans,sans-serif', fontSize: 15,
-                          color: C.text, outline: 'none', boxSizing: 'border-box',
-                        }}/>
-                    )}
-                    {!f.isNew && (
-                      <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted, marginTop: 4 }}>
-                        Submitted by the customer. Confirm or correct it.
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </Card>
-            ) : order.subStream === 'beehives' ? (
-              <Alert type="warning"
-                message="Steritech has not defined the Beehives arrival fields yet. The row exists in their workbook but is empty." />
-            ) : (
-              <Alert type="info"
-                message={`${subStreamLabel(order) || 'This form'} has no extra arrival fields. Only the damage photo and the product lines are captured here.`} />
-            )}
-
           </>
         )}
 
       </div>
 
-      <div style={{ background: '#fff', borderTop: `1px solid ${C.border}`, padding: '12px 16px', display: 'flex', gap: 10 }}>
-        <button onClick={back} style={{
-          flex: '0 0 38%', padding: '14px', borderRadius: 12,
-          background: '#fff', border: `1.5px solid ${C.border}`, color: C.text,
-          fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 600, cursor: 'pointer',
-        }}>{step === 1 ? 'Back' : '← Previous'}</button>
-        <button onClick={next} disabled={step === TOTAL && blocked} style={{
-          flex: 1, padding: '14px', borderRadius: 12,
-          background: step === TOTAL ? (blocked ? '#D1D5DB' : C.orange) : C.brand,
-          border: 'none', color: step === TOTAL && blocked ? '#9CA3AF' : '#fff',
-          fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 700,
-          cursor: step === TOTAL && blocked ? 'not-allowed' : 'pointer',
-        }}>{step === TOTAL ? (blocked ? 'Blocked - resolve product lines' : 'Confirm Arrival') : 'Continue →'}</button>
+      <div style={{ background: '#fff', borderTop: `1px solid ${C.border}`, padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {/* Rev3, FDB-303: while receiving is blocked the operator is not stuck on
+            this pallet. Everything captured is kept, and the next pallet can be
+            started from the Arrival list. */}
+        {step === TOTAL && blocked && (
+          <button onClick={saveDraft} style={{
+            width: '100%', padding: '13px', borderRadius: 12, cursor: 'pointer',
+            background: '#FFFBEB', border: '1.5px solid #FDE68A', color: '#92400E',
+            fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 700,
+          }}>Save draft and go to next pallet</button>
+        )}
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={back} style={{
+            flex: '0 0 38%', padding: '14px', borderRadius: 12,
+            background: '#fff', border: `1.5px solid ${C.border}`, color: C.text,
+            fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 600, cursor: 'pointer',
+          }}>{step === 1 ? 'Back' : '← Previous'}</button>
+          <button onClick={next} disabled={step === TOTAL && blocked} style={{
+            flex: 1, padding: '14px', borderRadius: 12,
+            background: step === TOTAL ? (blocked ? '#D1D5DB' : C.orange) : C.brand,
+            border: 'none', color: step === TOTAL && blocked ? '#9CA3AF' : '#fff',
+            fontFamily: 'DM Sans,sans-serif', fontSize: 15, fontWeight: 700,
+            cursor: step === TOTAL && blocked ? 'not-allowed' : 'pointer',
+          }}>{step === TOTAL ? 'Confirm Arrival' : 'Continue →'}</button>
+        </div>
       </div>
 
       {/* ── Product picker: the BC references available for this customer ──── */}
@@ -4559,14 +5401,23 @@ const PrintLabelsScreen = ({ navigate, appData }) => {
       bottomBar={
         /* No Print button. Booking the pallet in printed it, and the pallet is
            already Received by the time this screen opens. The only thing left
-           for the operator is to attach it and go and scan the bin. */
-        <Btn label="Label Attached - Scan Bin →"
-          onClick={() => navigate('scan_bin', { binPhase: 'pre_treatment' })}
-          color="orange" large />
+           for the operator is to attach it and go and scan the bin.
+
+           Rev3, FDB-305, adds a second way out. "Can this step include a second
+           option, Continue to next receival ... printers are on the edge of the
+           warehouse so walking from the floor to the edge for each pallet (say 20
+           times), will waste a lot of extra time." The label has printed either
+           way; this just lets the operator leave it at the printer and carry on. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <Btn label="Label Attached - Scan Bin →"
+            onClick={() => { LABELS_WAITING.delete(pallet.id); navigate('scan_bin', { binPhase: 'pre_treatment' }); }}
+            color="orange" large />
+          <Btn label="Continue to next receival" color="blue" outline
+            onClick={() => { LABELS_WAITING.add(pallet.id); navigate('task_queue', { taskStep: 'arrival', queueBack: false }); }} />
+        </div>
       }>
       <div style={{ padding: '20px 16px' }}>
-        <SectionTitle title="Pallet label"
-          subtitle="One label for this pallet, listing every product line on it" />
+        <SectionTitle title="Pallet label" />
 
         {/* The label preview carries exactly the fields Steritech listed. */}
         <div style={{
@@ -4629,7 +5480,12 @@ const PrintLabelsScreen = ({ navigate, appData }) => {
           </div>
         </div>
 
-        <Alert type="teal" message="Printed when you booked this pallet in. Attach it, then scan the bin it goes into." />
+        {/* Rev3, FDB-399: "Include the printer name or reference in the green
+            card on this screen." */}
+        <Alert type="teal" message={`Printed on ${printerFor(order)}. Attach it, then scan the bin.`} />
+        {/* The helper the notes ask for: receival can carry on, the label is
+            already out. */}
+        <Alert type="info" message="Label printed. You can continue receiving." />
       </div>
     </PageWrapper>
   );
@@ -4661,14 +5517,20 @@ Object.assign(window, {
   ordersAtSite, palletsAtSite, SiteSelectScreen, SiteRow,
   PRIORITY_VISIBLE_AT, priorityVisibleAt,
   DEMO_TODAY, AGE_WATCH, AGE_WARN, orderDate, ageDays, ageTone, AgeChip,
-  SidePanel, SearchBar, palletMatches, orderMatches, QueueLotGroup, StepIcon,
-  LOT_AUTO_OPEN, LOT_PREVIEW,
+  SidePanel, SearchBar, palletMatches, orderMatches, QueueOrderCard, StepIcon,
+  StreamFilter, PickTabs, SinglePickNext, SingleSchedule,
+  ACCOUNT_SITE, SERVICE_STREAM, STREAM_LABEL, STREAM_SHORT, STREAM_ORDER, streamsAtSite,
+  streamMatches, palletsInScope, ordersInScope, StreamSelectScreen,
+  setPalletHold, isHeld, holdLabel, canRaiseIncident,
+  pickOrders, scheduleOrders, zoneOf, zonesFor, pickStatus,
+  ARRIVAL_DRAFTS, ORDER_ARRIVAL, LABELS_WAITING, draftFor, draftsFor, labelsWaiting, printerFor,
   SplashScreen, ScanEmployeeScreen, DashboardScreen, TaskQueueScreen, AllOrdersScreen,
   OrderDetailScreen, PalletDetailScreen,
   TIMELINE_STEPS, STATUS_ORDER, statusIndex, STATE_TO_STEP, KPI,
   ScanPalletScreen,
   ScanBinScreen, SummaryScreen, ReceivingFormScreen, PrintLabelsScreen,
   BC_PRODUCTS, BC_PRODUCTS_FALLBACK, bcProductsFor, ARRIVAL_FIELDS,
+  ARRIVAL_CHARGES, CHARGE_FORMS, IncidentScreen, HOLD_REASONS,
   ReadRow, ReadGrid, EditRow,
 });
 
@@ -4729,13 +5591,17 @@ const ProcessInScreen = ({ navigate, appData }) => {
   return (
     <PageWrapper title="Process In" onBack={() => navigate(appData.queueBack ? 'task_queue' : 'pallet_detail')}
       bottomBar={
+        /* Rev3, FDB-301: back to the single-pick card, which now shows this
+           lot one pallet further on, or the next order once this one is fully
+           scanned. Reached any other way (a Tweaks deep link, the pallet screen)
+           it still lands on the pallet. */
         <Btn label={scanned ? 'Continue →' : 'Scan the process bin to continue'}
-          onClick={() => navigate('pallet_detail')}
+          onClick={() => navigate(appData.queueBack ? 'task_queue' : 'pallet_detail')}
           color="orange" disabled={!scanned} />
       }>
       <div style={{ padding: '20px 16px 8px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <SectionTitle title="Process In" subtitle="Per the schedule" />
+          <SectionTitle title="Process In" />
           <StreamBadge stream={order.stream} />
         </div>
 
@@ -4752,7 +5618,13 @@ const ProcessInScreen = ({ navigate, appData }) => {
                 scheduling step." The 19 Aug workbook does put a same-priority
                 listing on the process screens, so the QUEUE below is untouched -
                 only the number is gone. PRIORITY_VISIBLE_AT puts it back. */}
-            <AgeChip order={order} />
+            {/* Rev3: the schedule number is back here, and only here. The
+                Scheduling card is gone (FDB-306) and Process In is where the
+                schedule is read, so PRIORITY_VISIBLE_AT now names this step. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              {priorityVisibleAt('process_in') && <PriorityChip order={order} current />}
+              <AgeChip order={order} />
+            </div>
           </div>
           <InfoRow label="Customer Name" value={order.customer} />
           {/* The workbook's own label, used on column I and column K alike. */}
@@ -4767,15 +5639,10 @@ const ProcessInScreen = ({ navigate, appData }) => {
               background: gate.complete ? C.green : C.orange,
             }}/>
           </div>
-          <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 8, lineHeight: 1.45 }}>
-            {gate.complete
-              ? 'Every pallet on this lot is in the process bin. The lot status can move on.'
-              : 'The lot status does not close until every pallet on it has been processed in.'}
-          </div>
         </Card>
 
         {/* Column J: one field, written by a scan. */}
-        <SectionTitle title="Process bin" subtitle="Scan the process barcode to move the pallet" />
+        <SectionTitle title="Process bin" />
         <PalletChip id={pallet.id} />
         <div style={{ height: 12 }}/>
         {scanned ? (
@@ -4801,8 +5668,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
             <div style={{ height: 18 }}/>
             {/* Same list, same order - it is still sorted by the schedule
                 number underneath. Only the heading stopped quoting it. */}
-            <SectionTitle title="Also in this schedule run"
-              subtitle="Scheduled alongside this lot, waiting to be processed in. This lot is the one in action." />
+            <SectionTitle title="Also in this schedule run" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
                 const g = lotGate(o, 5);
@@ -4886,7 +5752,7 @@ const ProcessOutScreen = ({ navigate, appData }) => {
       }>
       <div style={{ padding: '20px 16px 8px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-          <SectionTitle title="Process Out" subtitle="Per the schedule" />
+          <SectionTitle title="Process Out" />
           <StreamBadge stream={order.stream} />
         </div>
 
@@ -4976,8 +5842,7 @@ const ProcessOutScreen = ({ navigate, appData }) => {
         {samePriority.length > 0 && (
           <>
             <div style={{ height: 18 }}/>
-            <SectionTitle title="Also in this schedule run"
-              subtitle="Scheduled alongside this lot, waiting to be processed out. This lot is the one in action." />
+            <SectionTitle title="Also in this schedule run" />
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {samePriority.slice(0, SAME_PRIORITY_PREVIEW).map(o => {
                 const g = lotGate(o, 6);
@@ -5207,7 +6072,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
         </Card>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-          <SectionTitle title="QA Review" subtitle="Lot level - one outcome for the whole consignment" />
+          <SectionTitle title="QA Review" />
           <Badge state={cfg.badge.state} label={cfg.badge.label} />
         </div>
         <PalletChip id={appData.palletId || DEFAULT_PALLET_ID} />
@@ -5263,8 +6128,7 @@ const QAStatusScreen = ({ navigate, appData, setAppData }) => {
             operator scan. */}
         {!gate.complete && (
           <>
-            <SectionTitle title={`Still in the process bin (${waitingOn.length})`}
-              subtitle="Operators scan these out one at a time. QA starts once the last one is out." />
+            <SectionTitle title={`Still in the process bin (${waitingOn.length})`} />
             <Card style={{ padding: '6px 0', marginBottom: 14 }}>
               {waitingOn.map(p => (
                 <div key={p.id} style={{
@@ -5734,11 +6598,11 @@ const ProfileScreen = ({ navigate, appData }) => {
           <InfoRow label="App version"  value="1.0.0" />
         </Card>
 
-        {/* An operator can be moved to another site mid-shift, so changing site
-            is a normal action, not a sign-out. */}
-        <Btn label="Change Site" onClick={() => navigate('site_select')} color="blue" outline />
+        {/* Rev3: site and stream are chosen together on one page, with the
+            account's site picked to start with. One button reopens it. */}
+        <Btn label="Change Site / Stream" onClick={() => navigate('stream_select')} color="blue" outline />
         <div style={{ height: 10 }}/>
-        <Btn label="Sign Out" onClick={() => navigate('splash', { operator: '', site: null })} color="red" outline />
+        <Btn label="Sign Out" onClick={() => navigate('splash', { operator: '', site: null, workStream: null })} color="red" outline />
       </div>
     </PageWrapper>
   );
@@ -5761,12 +6625,14 @@ const SCREEN_MAP = {
   splash:                   SplashScreen,
   scan_employee:            ScanEmployeeScreen,
   site_select:              SiteSelectScreen,
+  stream_select:            StreamSelectScreen,
   dashboard:                DashboardScreen,
   task_queue:               TaskQueueScreen,
   all_orders:               AllOrdersScreen,
   order_detail:             OrderDetailScreen,
   pallet_detail:            PalletDetailScreen,
   scan_pallet:              ScanPalletScreen,
+  incident:                 IncidentScreen,
   scan_bin:                 ScanBinScreen,
   summary:                  SummaryScreen,
   receiving_form:           ReceivingFormScreen,
@@ -5805,6 +6671,16 @@ function App() {
     // the app is scoped to it. Null only on a Tweaks deep link, where showing
     // every site is the honest fallback.
     site: null,
+    // ── Rev 3 (15 Sep notes) ──────────────────────────────────────────────────
+    // The stream the operator picked after signing in: 'irradiation', 'eto' or
+    // 'packing'. It scopes the home counts and every queue (FDB-308). Null only on
+    // a Tweaks deep link, where showing every stream is the honest fallback.
+    workStream: null,
+    // Set by the home "On Hold / Damage" action so the scan screen hands the pallet
+    // to the incident form instead of the pallet view (FDB-307). Null otherwise.
+    scanIntent: null,
+    // Where the incident form's back arrow goes.
+    incidentBack: 'pallet_detail',
     // ── 10 Sep rebuild ────────────────────────────────────────────────────────
     // Which step's queue is open. A key from WORK_STEPS, never a step name.
     //
