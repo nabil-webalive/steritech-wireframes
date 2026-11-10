@@ -68,7 +68,7 @@
     <option value="order_detail">Order Detail (ORD - pallet list)</option>
     <option value="pallet_detail">Pallet Detail (PLT - workflow)</option>
     <option value="scan_pallet">Pallet/Order Search (scan or search)</option>
-    <option value="incident">On Hold / Damage (form)</option>
+    <option value="incident">On Hold (form)</option>
     <option value="scan_bin">Scan Bin Location</option>
     <option value="summary">Pallet Summary (demo only - no route)</option>
     <option value="receiving_form">Arrival Form (product-line matching)</option>
@@ -2726,7 +2726,7 @@ const DashboardScreen = ({ navigate, appData }) => {
             </div>
             <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
               <div style={{ fontFamily: 'Outfit,sans-serif', fontSize: 14.5, fontWeight: 700, color: C.text }}>
-                On Hold / Damage
+                On Hold
               </div>
               <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11.5, color: C.muted, marginTop: 2 }}>
                 Scan a label to report a problem
@@ -3718,7 +3718,7 @@ const OrderDetailScreen = ({ navigate, appData }) => {
               width: '100%', height: 42, borderRadius: 12, cursor: 'pointer',
               background: '#FFFBEB', border: '1.5px solid #FDE68A',
               fontFamily: 'DM Sans,sans-serif', fontSize: 14, fontWeight: 700, color: '#92400E',
-            }}>On Hold / Damage</button>
+            }}>On Hold</button>
         )}
         <Btn label="Scan Pallet →" onClick={() => navigate('scan_pallet', { selectedOrder: order, selectedPallet: null, scanIntent: null })} color="orange" large />
       </div>
@@ -3978,7 +3978,7 @@ const PalletDetailScreen = ({ navigate, appData }) => {
               <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
               <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
             </svg>
-            On Hold / Damage
+            On Hold
           </button>
         )}
 
@@ -4108,7 +4108,7 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   const [mismatch, setMismatch] = React.useState(null);
   // Rev3, FDB-399 / FDB-307. With no pallet or order in hand this screen is the
   // home "Pallet/Order Search": scan a label, or search for the order. When the
-  // operator came from the On Hold / Damage action (scanIntent), the same screen
+  // operator came from the On Hold action (scanIntent), the same screen
   // finds the pallet and hands it to the incident form instead of the pallet view.
   const intent    = appData.scanIntent || null;
   const discovery = !expected && !expectedOrder;
@@ -4124,7 +4124,11 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   // starts at the dock, so an arriving pallet is the useful default.
   const firstFor = state => orderPallets(order).find(p => p.state === state)
     || ALL_PALLETS.find(p => p.state === state);
+  // When the operator came from an order, the scan must land on a pallet OF that
+  // order. firstFor() falls back to the whole yard, which picked a pallet from a
+  // different order and tripped the Wrong Pallet guard on a correct scan.
   const target = expected
+    || (expectedOrder && (orderPallets(expectedOrder).find(p => p.state !== 'SHIPPED') || orderPallets(expectedOrder)[0]))
     || firstFor('ARRIVED')
     || orderPallets(order)[0]
     || DEFAULT_PALLET;
@@ -4266,7 +4270,7 @@ const ScanPalletScreen = ({ navigate, appData }) => {
   );
 
   return (
-    <PageWrapper title={discovery ? (intent === 'incident' ? 'On Hold / Damage' : 'Pallet/Order Search') : 'Scan Pallet'}
+    <PageWrapper title={discovery ? (intent === 'incident' ? 'On Hold' : 'Pallet/Order Search') : 'Scan Pallet'}
       onBack={() => navigate('dashboard', { scanIntent: null })}
       bottomBar={(expected || expectedOrder) ? (
         <button onClick={() => handleScan(decoy)} style={{
@@ -4387,7 +4391,7 @@ const IncidentScreen = ({ navigate, appData }) => {
   );
 
   return (
-    <PageWrapper title="On Hold / Damage" onBack={() => navigate(back, { selectedOrder: order, selectedPallet: pallet })}
+    <PageWrapper title="On Hold" onBack={() => navigate(back, { selectedOrder: order, selectedPallet: pallet })}
       bottomBar={<Btn label={kind === 'damage' ? 'Mark as Damaged' : 'Put On Hold'} color={kind === 'damage' ? 'red' : 'orange'}
         onClick={submit} disabled={!targets.length} />}>
       <div style={{ padding: '20px 16px 12px' }}>
@@ -4403,12 +4407,9 @@ const IncidentScreen = ({ navigate, appData }) => {
           </div>
         </Card>
 
-        <Lbl>What is wrong</Lbl>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-          <Seg value="hold"   current={kind} onSet={setKindAndReason} label="On hold" />
-          <Seg value="damage" current={kind} onSet={setKindAndReason} label="Damaged" />
-        </div>
-
+        {/* Damage is no longer raised here. It is captured at arrival, as the
+            "Damaged Pallet/Carton (picture)" field in column E, so this screen is
+            for holds only. */}
         <Select label="Reason" value={reason} onChange={e => setReason(e.target.value)}
           options={HOLD_REASONS[kind].map(r => ({ value: r, label: r }))} />
 
@@ -5079,6 +5080,36 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
               <div style={{ flex: 1, height: 1, background: C.border }}/>
             </div>
 
+            {/* Column E, ALL forms: "Damaged Pallet/Carton (picture)". It sits
+                outside the per-form list below because every form has it, including
+                Biosecurity and Medical, which have no other arrival fields. Optional:
+                a photo is only taken when something arrived damaged. */}
+            <SectionTitle title="Damage check" />
+            <Card style={{ padding: 16, marginBottom: 14 }}>
+              <label style={{
+                display: 'block', fontFamily: 'DM Sans,sans-serif', fontSize: 11,
+                fontWeight: 700, color: C.muted, marginBottom: 5,
+                textTransform: 'uppercase', letterSpacing: '0.6px',
+              }}>Damaged Pallet/Carton (picture)</label>
+              <div onClick={() => setAF('Damaged Pallet/Carton (picture)', arrival['Damaged Pallet/Carton (picture)'] ? '' : 'DAMAGE-001.jpg')} style={{
+                borderRadius: 10, cursor: 'pointer', padding: '14px 12px',
+                border: `1.5px dashed ${arrival['Damaged Pallet/Carton (picture)'] ? '#86EFAC' : '#93C5FD'}`,
+                background: arrival['Damaged Pallet/Carton (picture)'] ? '#F0FDF4' : '#F8FAFC',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={arrival['Damaged Pallet/Carton (picture)'] ? '#15803D' : C.brand} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                  <circle cx="12" cy="13" r="4"/>
+                </svg>
+                <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 13.5, fontWeight: 700, color: arrival['Damaged Pallet/Carton (picture)'] ? '#15803D' : C.brand }}>
+                  {arrival['Damaged Pallet/Carton (picture)'] || 'Take photo'}
+                </span>
+              </div>
+              <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, color: C.muted, marginTop: 6 }}>
+                Only if the pallet or its cartons arrived damaged.
+              </div>
+            </Card>
+
             {/* Column E of the workbook, for this order's form only. Blue cells
                 are tagged NEW FIELD; the rest already exist on the order and so
                 arrive pre-filled for the operator to confirm. Rev3 splits them by
@@ -5194,7 +5225,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 message="Steritech has not defined the Beehives arrival fields yet. The row exists in their workbook but is empty." />
             ) : (
               <Alert type="info"
-                message={`${subStreamLabel(order) || 'This form'} has no extra arrival fields. Only the product lines are captured here.`} />
+                message={`${subStreamLabel(order) || 'This form'} has no extra arrival fields. Only the damage photo and the product lines are captured here.`} />
             )}
           </>
         )}
@@ -6676,7 +6707,7 @@ function App() {
     // 'packing'. It scopes the home counts and every queue (FDB-308). Null only on
     // a Tweaks deep link, where showing every stream is the honest fallback.
     workStream: null,
-    // Set by the home "On Hold / Damage" action so the scan screen hands the pallet
+    // Set by the home "On Hold" action so the scan screen hands the pallet
     // to the incident form instead of the pallet view (FDB-307). Null otherwise.
     scanIntent: null,
     // Where the incident form's back arrow goes.
