@@ -1292,10 +1292,9 @@ const bulkMerrifield = () => BULK_NAMES.map((customer, i) => {
   // Packing is allowed at Merrifield, but never on a lot that is still at
   // Arrival, because packing has no arrival form on this sheet.
   const isPacking = state !== 'ARRIVED' && i % 5 === 4;
-  // Only the two fresh-produce forms have arrival fields, so only those two
-  // ever sit at Arrival.
+  // Every irradiation form has the Damaged Pallet/Carton picture at arrival
+  // (column E, ALL), so any of the four forms can sit at Arrival.
   const sub  = isPacking ? null
-    : state === 'ARRIVED' ? (i % 2 ? 'fresh_export' : 'fresh_domestic')
     : BULK_SUBS[i % BULK_SUBS.length];
   const num  = 100 + i;                      // ORD-2026-100 upwards
   const id   = `ORD-2026-${num}`;
@@ -1508,6 +1507,16 @@ const ALL_PALLETS     = SAMPLE_ORDERS.flatMap(o => o.pallets.map(p => ({ ...p, o
 const DEFAULT_PALLET_ORDER = SAMPLE_ORDERS[0];
 const DEFAULT_PALLET  = SAMPLE_ORDERS[0].pallets[0];
 const DEFAULT_PALLET_ID = DEFAULT_PALLET.id;
+// Scheduling is Business Central's, and it is optional: a stored pallet can be
+// processed in without it (manager). An order counts as scheduled once any of its
+// pallets has been staged or moved past that, and only a scheduled order carries a
+// priority number. Client, 25 Aug: BC stamps ~50 when it RELEASES a job to the
+// schedule, so before that there is no number at all.
+const SCHEDULED_STATES = ['STAGED', 'IN_TREATMENT', 'PROCESS_OUT', 'IN_STORAGE_PROCESSED', 'QA_HOLD', 'QA_RELEASED', 'SHIPPED'];
+const isScheduledOrder = o => !!o && (o.pallets || []).some(p => SCHEDULED_STATES.indexOf(p.state) >= 0);
+// Seed data cleanup: an order not yet scheduled has no priority. priorityOf() falls
+// back to the default for sorting, but nothing shows the number for these orders.
+SAMPLE_ORDERS.forEach(o => { if (!isScheduledOrder(o)) delete o.priority; });
 // ── Site scoping ─────────────────────────────────────────────────────────────
 // An operator signs in, picks their site, and from that point every list in the
 // app is that site's yard only. Nothing filters by site further down: the four
@@ -1836,10 +1845,16 @@ const WORK_STEPS = [
     //                   scheduling, 'oldest' is the stand-in where nothing else
     //                   orders the work (see Dispatch)
     key: 'process_in', label: 'Process In', hint: 'Scan pallets into the process bin',
-    states: ['STAGED'], owner: 'scan', showPriority: false, colour: '#D97706',
+    // Schedule is optional, so a stored pallet is Process In work too and is counted
+    // here. The hidden Scheduling step still lists it first for search hits.
+    states: ['STAGED', 'IN_STORAGE_UNPROCESSED'], owner: 'scan', showPriority: false, colour: '#D97706',
     opens: 'process_in',
     pick: {
-      pickStates: ['STAGED'], scheduleStates: ['IN_STORAGE_UNPROCESSED', 'STAGED'],
+      // Schedule is NOT mandatory (manager): a stored pallet can be processed in
+      // without waiting on Business Central. So it is pickable, but only a STAGED
+      // pallet counts as scheduled (it is what carries a priority number).
+      pickStates: ['STAGED', 'IN_STORAGE_UNPROCESSED'], scheduledStates: ['STAGED'],
+      scheduleStates: ['IN_STORAGE_UNPROCESSED', 'STAGED'],
       orderBy: 'priority', tabs: ['Next up', 'Full schedule'],
       verb: 'process in', instruction: 'pick',
       // Pallets at or past this internal step count as done, and what the count
@@ -1991,7 +2006,7 @@ const pickOrders = (step, site, stream) => {
   });
   // An order Business Central has scheduled comes before one it has not, then the
   // usual order. Only scheduled orders carry a priority.
-  const isSched = o => orderPallets(o).some(p => cfg.pickStates.indexOf(p.state) >= 0);
+  const isSched = o => orderPallets(o).some(p => (cfg.scheduledStates || cfg.pickStates).indexOf(p.state) >= 0);
   return [...seen.values()].sort((a, b) =>
     (isSched(b) - isSched(a)) ||
     (cfg.orderBy === 'priority'
@@ -2009,7 +2024,7 @@ const scheduleOrders = (step, site, stream) => {
   });
   // An order Business Central has scheduled comes before one it has not, then the
   // usual order. Only scheduled orders carry a priority.
-  const isSched = o => orderPallets(o).some(p => cfg.pickStates.indexOf(p.state) >= 0);
+  const isSched = o => orderPallets(o).some(p => (cfg.scheduledStates || cfg.pickStates).indexOf(p.state) >= 0);
   return [...seen.values()].sort((a, b) =>
     (isSched(b) - isSched(a)) ||
     (cfg.orderBy === 'priority'
@@ -2904,12 +2919,13 @@ const SinglePickNext = ({ step, order, stream, navigate }) => {
     return (
       <div style={{ textAlign: 'center', padding: '34px 16px', color: C.muted, fontFamily: 'DM Sans,sans-serif', fontSize: 13, lineHeight: 1.5 }}>
         {step.key === 'process_in'
-          ? `Nothing is scheduled to process in${stream ? ` for ${STREAM_LABEL[stream]}` : ''} right now. Orders still waiting on the Business Central schedule are under Full schedule.`
+          ? `Nothing is waiting to process in${stream ? ` for ${STREAM_LABEL[stream]}` : ''} right now.`
           : `Nothing is released and waiting for dispatch${stream ? ` for ${STREAM_LABEL[stream]}` : ''} right now.`}
       </div>
     );
   }
   const all     = orderPallets(order);
+  const orderScheduled = all.some(p => (cfg.scheduledStates || cfg.pickStates).indexOf(p.state) >= 0);
   const rows    = all.map(p => ({ p, s: pickStatus(p, step) }))
                      .sort((a, b) => (b.s.work - a.s.work) || a.p.id.localeCompare(b.p.id));
   const ready   = rows.filter(r => r.s.work).map(r => r.p);
@@ -2938,7 +2954,7 @@ const SinglePickNext = ({ step, order, stream, navigate }) => {
         <div style={{ background: `${step.colour}14`, padding: '8px 14px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ width: 8, height: 8, borderRadius: 4, background: step.colour }}/>
           <span style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 11, fontWeight: 700, color: step.colour, textTransform: 'uppercase', letterSpacing: 0.7 }}>
-            Next up · in action
+            {orderScheduled ? 'Next up · in action' : 'Next up · not scheduled yet'}
           </span>
         </div>
 
@@ -2946,7 +2962,7 @@ const SinglePickNext = ({ step, order, stream, navigate }) => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
             <span style={{ fontFamily: 'Outfit,sans-serif', fontSize: 17, fontWeight: 700, color: C.text }}>{lotText(order)}</span>
             <StreamBadge stream={order.stream} />
-            {priorityVisibleAt(step.key) && <PriorityChip order={order} current />}
+            {priorityVisibleAt(step.key) && orderScheduled && <PriorityChip order={order} current />}
           </div>
           <div style={{ fontFamily: 'DM Sans,sans-serif', fontSize: 12.5, color: C.muted, marginTop: 3 }}>
             {order.customer}{subStreamLabel(order) ? ` · ${subStreamLabel(order)}` : ''}
@@ -3035,11 +3051,12 @@ const SingleSchedule = ({ step, orders, current, navigate }) => {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {orders.map(o => {
           const ps        = orderPallets(o);
-          const scheduled = ps.some(p => cfg.pickStates.indexOf(p.state) >= 0);
+          const scheduled = ps.some(p => (cfg.scheduledStates || cfg.pickStates).indexOf(p.state) >= 0);
           const gate      = lotGate(o, cfg.doneStep);
           const isCurrent = current && current.id === o.id;
           const status    = isCurrent ? { t: 'In action', bg: '#FEE2E2', fg: '#991B1B' }
                           : scheduled ? { t: step.key === 'dispatch' ? 'Ready' : 'Scheduled', bg: '#DCFCE7', fg: '#15803D' }
+                          : step.key === 'process_in' ? { t: 'Not scheduled', bg: '#E2E8F0', fg: '#475569' }
                           : null;
           return (
             <Card key={o.id} style={{ padding: '12px 14px', cursor: 'pointer' }}
@@ -4743,6 +4760,14 @@ const BC_PRODUCTS_FALLBACK = [
 ];
 const bcProductsFor = customer => BC_PRODUCTS[customer] || BC_PRODUCTS_FALLBACK;
 
+// The customer's free-text Comments (column D). The one sample note is fresh
+// produce wording, so the other forms carry their own instead of repeating it.
+const SUB_COMMENTS = {
+  medical:     'Sterile medical devices. Keep dry and handle with care.',
+  biosecurity: 'Container unloaded to the dock. Cartons banded and labelled.',
+  beehives:    '',
+};
+
 // Column E of the workbook, cell for cell. Two things this encodes that a plain
 // field list cannot:
 //
@@ -5016,7 +5041,7 @@ const ReceivingFormScreen = ({ navigate, appData }) => {
                 value={(order.storageHandling || []).join(' · ')}
                 corrected={corrections['Request Storage and Handling Conditions']} editing={editing}
                 onChange={v => correct('Request Storage and Handling Conditions', v)}/>
-              <EditRow label="Comments" value={req.notes}
+              <EditRow label="Comments" value={SUB_COMMENTS[order.subStream] || req.notes}
                 corrected={corrections['Comments']} editing={editing}
                 onChange={v => correct('Comments', v)}/>
             </Card>
@@ -5538,7 +5563,7 @@ Object.assign(window, {
   orderSteritechStatus, orderCustomerStatus, palletsAtOrPast, lotGate,
   lotAllProcessedIn, lotAllProcessedOut, processBinSplit, processBinNote,
   palletOf, palletAction,
-  orderOfPallet,
+  orderOfPallet, isScheduledOrder,
   PalletRowCard, PalletGroupSection, PriorityChip, BCStepsNote,
   // The 10 Sep rebuild. WORK_STEPS is the task list the home flow is built from,
   // and the ageing helpers are read by the process screens in the next block too.
@@ -5603,6 +5628,10 @@ const ProcessInScreen = ({ navigate, appData }) => {
   const order  = appData.selectedOrder || SAMPLE_ORDERS[0];
   const pallet = palletOf(appData, order);
   const [scanned, setScanned] = React.useState(false);
+  // Schedule is optional. An order only carries a priority once Business Central
+  // has scheduled it (a pallet is STAGED), so an unscheduled order shows none.
+  // Read once on open: scanning the last staged pallet must not hide the chip.
+  const wasScheduled = React.useRef(orderPallets(order).some(p => p.state === 'STAGED'));
   // Step 5, not 4. The scan on this screen moves a pallet from STAGED (4) into
   // the process bin (5), so the count is of pallets that have BEEN processed in.
   // Counting step 4 counted the pallet in the operator's hands before they had
@@ -5615,7 +5644,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
   // Scoped to the operator's own site: another site's schedule is not their
   // queue and they cannot walk to it.
   const samePriority = ordersAtSite(appData.site)
-    .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
+    .filter(o => o.id !== order.id && isScheduledOrder(o) && priorityOf(o) === priorityOf(order)
       && lotGate(o, 5).done < lotGate(o, 5).total)
     .sort(byPriority);
 
@@ -5653,7 +5682,7 @@ const ProcessInScreen = ({ navigate, appData }) => {
                 Scheduling card is gone (FDB-306) and Process In is where the
                 schedule is read, so PRIORITY_VISIBLE_AT now names this step. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              {priorityVisibleAt('process_in') && <PriorityChip order={order} current />}
+              {priorityVisibleAt('process_in') && wasScheduled.current && <PriorityChip order={order} current />}
               <AgeChip order={order} />
             </div>
           </div>
@@ -5768,7 +5797,7 @@ const ProcessOutScreen = ({ navigate, appData }) => {
   // Same rule as process in: the queue is worked by priority and several lots can
   // sit at one level, so the rest of the level is listed.
   const samePriority = ordersAtSite(appData.site)
-    .filter(o => o.id !== order.id && priorityOf(o) === priorityOf(order)
+    .filter(o => o.id !== order.id && isScheduledOrder(o) && priorityOf(o) === priorityOf(order)
       && lotGate(o, 6).done < lotGate(o, 6).total)
     .sort(byPriority);
 
